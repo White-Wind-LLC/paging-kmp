@@ -9,4 +9,9 @@ pluginManagement {
 rootProject.name = "paging-kmp"
 
 include("paging-core")
-include("paging-samples")
+
+// Conditionally include samples to avoid configuring/running its tasks in CI/publish
+val excludeSamples: Boolean = gradle.startParameter.projectProperties["excludeSamples"]?.toBoolean() ?: false
+if (!excludeSamples) {
+    include("paging-samples")
+}

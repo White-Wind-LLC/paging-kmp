@@ -26,7 +26,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build
-        run: ./gradlew --no-daemon clean :paging-core:build
+        run: ./gradlew --no-daemon -PexcludeSamples=true clean :paging-core:build
 
       - name: Decode GPG private key (base64)
         run: |
@@ -40,7 +40,7 @@ jobs:
           SIGNING_IN_MEMORY_KEY_BASE64: ${{ secrets.SIGNING_IN_MEMORY_KEY_BASE64 }}
 
       - name: Publish and Release to Maven Central
-        run: ./gradlew --no-daemon --no-parallel :paging-core:publishAndReleaseToMavenCentral
+        run: ./gradlew --no-daemon --no-parallel -PexcludeSamples=true :paging-core:publishAndReleaseToMavenCentral
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
