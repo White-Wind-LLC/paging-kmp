@@ -26,7 +26,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build
-        run: ./gradlew --no-daemon clean build
+        run: ./gradlew --no-daemon clean :paging-core:build
 
       - name: Decode GPG private key (base64)
         run: |
