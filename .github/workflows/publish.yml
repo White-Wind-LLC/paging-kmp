@@ -25,6 +25,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Upgrade Kotlin Yarn lockfiles
+        run: ./gradlew --no-daemon -PexcludeSamples=true kotlinUpgradeYarnLock
+
       - name: Build
         run: ./gradlew --no-daemon -PexcludeSamples=true clean :paging-core:build
 
