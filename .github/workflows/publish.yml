@@ -1,0 +1,45 @@
+name: Publish to Maven Central
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        run: ./gradlew --no-daemon clean build
+
+      - name: Decode GPG private key (base64)
+        run: |
+          echo "${SIGNING_IN_MEMORY_KEY_BASE64}" | base64 --decode > /tmp/signing-key.asc
+          {
+            echo 'ORG_GRADLE_PROJECT_signingInMemoryKey<<EOF'
+            cat /tmp/signing-key.asc
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
+        env:
+          SIGNING_IN_MEMORY_KEY_BASE64: ${{ secrets.SIGNING_IN_MEMORY_KEY_BASE64 }}
+
+      - name: Publish and Release to Maven Central
+        run: ./gradlew --no-daemon publishAndReleaseToMavenCentral
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_IN_MEMORY_KEY_ID }}
