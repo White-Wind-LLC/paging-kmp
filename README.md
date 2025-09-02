@@ -1,5 +1,9 @@
 # Kotlin Multiplatform Paging Library
 
++
+
+[![Maven Central](https://img.shields.io/maven-central/v/ua.wwind.paging/paging-core)](https://central.sonatype.com/artifact/ua.wwind.paging/paging-core)
+
 Lightweight and efficient paging library for Kotlin Multiplatform with intelligent preloading, caching, and coroutines
 support.
 
@@ -21,7 +25,7 @@ Prerequisites: Kotlin `2.2.0`, repository `mavenCentral()`.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-kmp:1.0.0")
+    implementation("ua.wwind.paging:paging-core:1.0.1")
 }
 ```
 
@@ -104,9 +108,20 @@ The `paging-samples` module contains complete working examples:
 - Error handling and retry logic
 - UI integration patterns
 
+## Data Mapping
+You can transform items of `PagingData` while preserving loading state and retry logic.
+```kotlin
+// Given: PagingData<User>
+val mapped: PagingData<String> = pagingData.map { user -> "${user.id}: ${user.name}" }
+
+// Notes:
+// - Only currently loaded items are transformed
+// - loadState and retry remain unchanged
+```
+
 ## License
 
-Apache License 2.0 - [White Wind LLC](https://github.com/White-Wind-LLC/paging-kmp)
+This project is licensed under the Apache License 2.0. See `LICENSE` for details.
 
 ## Contributing
 

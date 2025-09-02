@@ -46,4 +46,13 @@ public data class PagingData<T>(
             return PagingData(PagingMap.empty(), LoadState.Success) {}
         }
     }
+    /**
+     * Transforms items in this PagingData from type T to type R while preserving
+     * paging state and retry functionality.
+     *
+     * Applies transformation only to currently loaded items, not future ones.
+     */
+    public fun <R> map(transform: (T) -> R): PagingData<R> {
+        return PagingData(data = data.mapValues(transform), loadState = loadState, retry = retry)
+    }
 }

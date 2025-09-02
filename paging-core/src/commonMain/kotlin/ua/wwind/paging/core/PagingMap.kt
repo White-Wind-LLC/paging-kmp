@@ -35,6 +35,19 @@ public data class PagingMap<V>(
             return PagingMap(0, emptyMap()) {}
         }
     }
+    /**
+     * Transforms the values in this PagingMap using the provided transformation function.
+     *
+     * Creates a new PagingMap with the same size and loading behavior, but with
+     * all currently loaded values transformed to type R. The transformation is applied
+     * only to items that are currently in memory, not to items that might be loaded later.
+     *
+     * @param transform Function to convert values from type V to type R
+     * @return New PagingMap with transformed values
+     */
+    public fun <R> mapValues(transform: (V) -> R): PagingMap<R> {
+        return PagingMap(size = size, values = values.mapValues { (_, value) -> transform(value) }, onGet = onGet)
+    }
 
     /**
      * Access operator that returns the state of an item at the given position.

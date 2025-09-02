@@ -33,6 +33,10 @@ kotlin {
             implementation(libs.arrow.core)
             implementation(libs.kotlinx.coroutines.core)
         }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
+        }
     }
 }
 
@@ -47,35 +51,50 @@ android {
     }
 }
 
+// POM/Publishing properties are sourced from gradle.properties
+val pomName: String = providers.gradleProperty("POM_NAME").get()
+val pomDescription: String = providers.gradleProperty("POM_DESCRIPTION").get()
+val pomInceptionYear: String = providers.gradleProperty("POM_INCEPTION_YEAR").get()
+val pomUrl: String = providers.gradleProperty("POM_URL").get()
+val pomLicenseName: String = providers.gradleProperty("POM_LICENSE_NAME").get()
+val pomLicenseUrl: String = providers.gradleProperty("POM_LICENSE_URL").get()
+val pomLicenseDist: String = providers.gradleProperty("POM_LICENSE_DIST").get()
+val pomDeveloperId: String = providers.gradleProperty("POM_DEVELOPER_ID").get()
+val pomDeveloperName: String = providers.gradleProperty("POM_DEVELOPER_NAME").get()
+val pomDeveloperUrl: String = providers.gradleProperty("POM_DEVELOPER_URL").get()
+val pomScmUrl: String = providers.gradleProperty("POM_SCM_URL").get()
+val pomScmConnection: String = providers.gradleProperty("POM_SCM_CONNECTION").get()
+val pomScmDevConnection: String = providers.gradleProperty("POM_SCM_DEV_CONNECTION").get()
+
 // Configure Maven Central publishing & signing
 mavenPublishing {
     publishToMavenCentral()
     signAllPublications()
-    coordinates(project.group.toString(), "paging-kmp", project.version.toString())
+    coordinates(project.group.toString(), "paging-core", project.version.toString())
 
     pom {
-        name.set("Paging for KMP")
-        description.set("Paging for Kotlin Multiplatform")
-        inceptionYear.set("2025")
-        url.set("https://github.com/White-Wind-LLC/paging-kmp")
+        name.set(pomName)
+        description.set(pomDescription)
+        inceptionYear.set(pomInceptionYear)
+        url.set(pomUrl)
         licenses {
             license {
-                name.set("The Apache License, Version 2.0")
-                url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
-                distribution.set("repo")
+                name.set(pomLicenseName)
+                url.set(pomLicenseUrl)
+                distribution.set(pomLicenseDist)
             }
         }
         developers {
             developer {
-                id.set("White-Wind-LLC")
-                name.set("White Wind")
-                url.set("https://github.com/White-Wind-LLC")
+                id.set(pomDeveloperId)
+                name.set(pomDeveloperName)
+                url.set(pomDeveloperUrl)
             }
         }
         scm {
-            url.set("https://github.com/White-Wind-LLC/paging-kmp")
-            connection.set("scm:git:git://github.com/White-Wind-LLC/paging-kmp.git")
-            developerConnection.set("scm:git:ssh://github.com/White-Wind-LLC/paging-kmp.git")
+            url.set(pomScmUrl)
+            connection.set(pomScmConnection)
+            developerConnection.set(pomScmDevConnection)
         }
     }
 }
@@ -85,4 +104,9 @@ tasks.register<org.gradle.jvm.tasks.Jar>("javadocJar") {
     dependsOn("dokkaGeneratePublicationHtml")
     from(layout.buildDirectory.dir("dokka/html"))
     archiveClassifier.set("javadoc")
+}
+
+// Ensure build fails if tests fail
+tasks.named("build").configure {
+    dependsOn("check")
 }
