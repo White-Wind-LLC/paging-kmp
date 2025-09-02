@@ -1,7 +1,5 @@
 # Kotlin Multiplatform Paging Library
 
-+
-
 [![Maven Central](https://img.shields.io/maven-central/v/ua.wwind.paging/paging-core)](https://central.sonatype.com/artifact/ua.wwind.paging/paging-core)
 
 Lightweight and efficient paging library for Kotlin Multiplatform with intelligent preloading, caching, and coroutines
