@@ -84,6 +84,7 @@ fun UserCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Text(user.id.toString())
         }
     }
 }

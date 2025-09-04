@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -25,6 +26,10 @@ import ua.wwind.paging.core.LoadState
 fun UserListTopBar(
     totalUsers: Int,
     loadState: LoadState,
+    useMediator: Boolean,
+    onUseMediatorChange: (Boolean) -> Unit,
+    cachedCount: Int?,
+    lastMinSavedKey: Int?,
     modifier: Modifier = Modifier,
 ) {
     TopAppBar(
@@ -40,11 +45,21 @@ fun UserListTopBar(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val summary = buildString {
+                        append(
+                            if (totalUsers > 0) "$totalUsers users" else "Loading users..."
+                        )
+                        if (useMediator && cachedCount != null) {
+                            append("  •  cache: ")
+                            append(cachedCount)
+                        }
+                        if (useMediator && lastMinSavedKey != null) {
+                            append("  •  minKey: ")
+                            append(lastMinSavedKey)
+                        }
+                    }
                     Text(
-                        text = when {
-                            totalUsers > 0 -> "$totalUsers users"
-                            else -> "Loading users..."
-                        },
+                        text = summary,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -56,6 +71,22 @@ fun UserListTopBar(
                         )
                     }
                 }
+            }
+        },
+        actions = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Mediator",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Switch(
+                    checked = useMediator,
+                    onCheckedChange = onUseMediatorChange
+                )
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(

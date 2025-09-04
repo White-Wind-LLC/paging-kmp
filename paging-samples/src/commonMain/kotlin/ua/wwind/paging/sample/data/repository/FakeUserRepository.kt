@@ -4,14 +4,14 @@ import kotlinx.coroutines.delay
 import ua.wwind.paging.sample.domain.model.User
 import ua.wwind.paging.sample.domain.model.UserRole
 import ua.wwind.paging.sample.domain.repository.UserPage
-import ua.wwind.paging.sample.domain.repository.UserRepository
+import ua.wwind.paging.sample.domain.repository.UserRemoteDataSource
 import kotlin.random.Random
 
 /**
- * Fake implementation of UserRepository for demonstration purposes
- * Simulates network delays and generates realistic user data
+ * Fake implementation of a remote user data source for demonstration purposes.
+ * Simulates network delays and generates realistic user data.
  */
-class FakeUserRepository : UserRepository {
+class FakeUserRemoteDataSource : UserRemoteDataSource {
 
     companion object {
         private const val TOTAL_USERS = 2500

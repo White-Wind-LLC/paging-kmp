@@ -4,6 +4,7 @@ import arrow.core.toNonEmptyListOrNull
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -57,20 +58,55 @@ public class Pager<T>(
     // Mutex to ensure thread-safe access to internal state
     private val mutex = Mutex()
 
-    // Debounced trigger for position changes to prevent excessive loading
-    private val keyTrigger = MutableStateFlow(1)
+    private enum class Direction { Increase, Decrease }
+
+    // Debounced trigger for the last accessed key only
+    private val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(1)
 
     // Track the last position that was requested for optimization
     private var lastReadKey: Int = 0
+
+    // Active loading job and its planned range; used to prevent duplicate loads and support cancellation
+    private var currentLoadJob: Job? = null
+    private var currentLoadingRange: IntRange? = null
 
     init {
         // Set up debounced loading pipeline
         scope.launch {
             keyTrigger
                 .debounce(300) // Wait 300ms for rapid position changes to settle
-                .distinctUntilChanged() // Ignore duplicate positions
+                .distinctUntilChanged() // Ignore duplicate keys
                 .collect { key ->
-                    loadPortion(key) // Load data for the requested position
+                    if (key <= 0) return@collect
+                    val direction = if (lastReadKey > 0 && key < lastReadKey) Direction.Increase else Direction.Decrease
+
+                    // Compute the range that would be loaded for this key based on current state
+                    val plannedRange = computeFetchFullRangeForKey(key)
+
+                    // If there is an active load and the new key is inside its range – ignore this key
+                    val activeJob = currentLoadJob
+                    if (activeJob?.isActive == true && currentLoadingRange?.contains(key) == true) {
+                        return@collect
+                    }
+
+                    // If there is an active load but the key is outside the current loading range – cancel and start new
+                    if (activeJob?.isActive == true && (currentLoadingRange?.contains(key) != true)) {
+                        activeJob.cancel(CancellationException("Pager: superseded by new key $key"))
+                    }
+
+                    // Start a new loading job for the new key
+                    currentLoadingRange = plannedRange
+                    val job = launch {
+                        loadPortion(key = key, primaryDirection = direction)
+                    }
+                    currentLoadJob = job
+                    job.invokeOnCompletion {
+                        // Clear references only if this is still the current job
+                        if (currentLoadJob === job) {
+                            currentLoadJob = null
+                            currentLoadingRange = null
+                        }
+                    }
                 }
         }
     }
@@ -85,7 +121,7 @@ public class Pager<T>(
      * 4. Update cache, removing items outside cache range
      * 5. Handle errors gracefully with retry capability
      */
-    private suspend fun loadPortion(key: Int) = mutex.withLock {
+    private suspend fun loadPortion(key: Int, primaryDirection: Direction) = mutex.withLock {
         try {
             val pagingData = _data.value
 
@@ -109,68 +145,66 @@ public class Pager<T>(
                 // Initial load case: load from beginning
                     1..preloadSize
 
-            // Priority loading range - centered around requested position
+            // Update the currently loading range to reflect the actual computation at runtime
+            currentLoadingRange = fetchFullRange
+
+            // Determine the primary range to load first (centered around the requested position)
             val startFetchRange =
                 ((coercedKey - loadSize / 2)..<(coercedKey - loadSize / 2 + loadSize))
                     .coerceIn(fetchFullRange)
                     .expandTo(size = loadSize, limit = fetchFullRange.last)
 
-            // Calculate ranges before the priority range that need loading
-            val beforeFetchRanges: List<IntRange> = (fetchFullRange.first..<startFetchRange.first)
+            // Chunks for the primary centered range first
+            val prioritizedChunks: List<IntRange> = startFetchRange
+                .minus(dataRange)
+                .flatMap { it.chunkedRanges(loadSize) }
+
+            // Compute ranges before and after the primary range
+            val beforeRangesRaw: List<IntRange> = (fetchFullRange.first..<startFetchRange.first)
                 .takeIf { startFetchRange.first > fetchFullRange.first }
-                ?.coerceIn(fetchFullRange)
-                ?.minus(dataRange) // Remove already loaded data
-                ?.let { list ->
-                    // Extend first range backwards if we're at the beginning
-                    val firstItem = list.firstOrNull()
-                    val firstItemCount = firstItem?.count() ?: 0
-                    if (firstItem?.first == fetchFullRange.first && fetchFullRange.first > 1 && firstItemCount < loadSize) {
-                        (firstItem.first - (loadSize - firstItemCount)..firstItem.last)
-                            .minus(dataRange) + list.drop(1)
-                    } else {
-                        list
-                    }
-                } ?: emptyList()
-
-            // Calculate ranges after the priority range that need loading
-            val afterFetchRange: List<IntRange> = ((startFetchRange.last + 1)..fetchFullRange.last)
+                ?.minus(dataRange) ?: emptyList()
+            val afterRangesRaw: List<IntRange> = ((startFetchRange.last + 1)..fetchFullRange.last)
                 .takeIf { startFetchRange.last < fetchFullRange.last }
-                ?.coerceIn(fetchFullRange)
-                ?.minus(dataRange) // Remove already loaded data
-                ?.let {
-                    // Extend last range forwards if we're at the end
-                    val lastItem = it.lastOrNull()
-                    val lastItemCount = lastItem?.count() ?: 0
-                    if (lastItem?.last == fetchFullRange.last && lastItemCount < loadSize) {
-                        (lastItem.first..(lastItem.last + (loadSize - lastItemCount)))
-                            .minus(dataRange) + it.dropLast(1)
-                    } else {
-                        it
-                    }
-                } ?: emptyList()
+                ?.minus(dataRange) ?: emptyList()
 
-            // Define cache boundaries - keep data within cacheSize of current position
-            val cacheRangeFromKey =
-                if (pagingData.size > 0)
-                    ((coercedKey - cacheSize)..<(coercedKey + cacheSize))
-                        .coerceIn(fullRange)
-                else
-                    1..cacheSize
+            // Extend edge pieces to a full load when they touch fetchFullRange boundaries
+            fun extendEdges(pieces: List<IntRange>): List<IntRange> = pieces.map { piece ->
+                val pieceCount = piece.count()
+                when {
+                    piece.first == fetchFullRange.first && pieceCount < loadSize -> {
+                        val start = (piece.first - (loadSize - pieceCount)).coerceAtLeast(1)
+                        start..piece.last
+                    }
+
+                    piece.last == fetchFullRange.last && pieceCount < loadSize -> {
+                        val end = piece.last + (loadSize - pieceCount)
+                        piece.first..end
+                    }
+
+                    else -> piece
+                }
+            }
+
+            val beforeChunks: List<IntRange> = extendEdges(beforeRangesRaw)
+                .flatMap { it.chunkedRanges(loadSize) }
+            val afterChunks: List<IntRange> = extendEdges(afterRangesRaw)
+                .flatMap { it.chunkedRanges(loadSize) }
+
+            // Directional prioritization: when moving up (new key < old), load increasing indices first; else decreasing first
+            val directionalChunks: List<IntRange> = when (primaryDirection) {
+                Direction.Increase -> afterChunks + beforeChunks
+                Direction.Decrease -> beforeChunks + afterChunks
+            }.sortedBy { abs(it.first - key) }
 
             // Build ordered list of ranges to load
-            // Priority: startFetchRange first, then others by distance from key
-            val enqueue =
-                startFetchRange
-                    .minus(dataRange) // Remove already loaded data
-                    .flatMap { it.chunkedRanges(loadSize) } + // Split into loadSize chunks
-                        (beforeFetchRanges + afterFetchRange)
-                            .flatMap {
-                                it.chunkedRanges(loadSize) // Split into loadSize chunks
-                            }
-                            .sortedBy { abs(it.first - key) } // Sort by distance from requested position
+            val enqueue = prioritizedChunks + directionalChunks
 
-            // Apply cache size limit
-            val dataMap = currentDataMap.filterKeys { it in cacheRangeFromKey }.toMutableMap()
+            // Apply cache size limit (immutable). We must avoid mutating the same Map instance
+            // across emissions, otherwise StateFlow's equality check can suppress updates.
+            // Do not constrain cacheRange by the (possibly unknown) fullRange; total size may be 0 initially
+            // and will be corrected by remote portions. We keep absolute window around the key.
+            val cacheRange = (coercedKey - cacheSize)..<(coercedKey + cacheSize)
+            var dataMap: Map<Int, T> = currentDataMap.filterKeys { it in cacheRange }
 
             // Execute loading operations
             enqueue
@@ -180,17 +214,20 @@ public class Pager<T>(
                 }?.onEach { fetchRange ->
                     // Load each range
                     val loadSize = fetchRange.last - fetchRange.first + 1
-                    readData(fetchRange.first, loadSize.toInt())
+                    readData(fetchRange.first, loadSize)
                         .collect { portion ->
-                            // Add newly loaded data to map
-                            dataMap.putAll(portion.values)
+                            // Build a new immutable map snapshot for each emission to ensure StateFlow emits
+                            val updatedValues: Map<Int, T> = (dataMap + portion.values)
+                                .filterKeys { it in cacheRange }
+                            dataMap = updatedValues
 
-                            // Update reactive state with new data, filtering to cache range
-                            _data.value = PagingMap(
-                                size = portion.totalSize,
-                                values = dataMap,
-                                onGet = ::onGet
-                            )
+                            _data.update {
+                                PagingMap(
+                                    size = portion.totalSize,
+                                    values = updatedValues,
+                                    onGet = ::onGet
+                                )
+                            }
                         }
 
                 }?.also {
@@ -243,7 +280,20 @@ public class Pager<T>(
      * @param key The position being accessed (1-based)
      */
     private fun onGet(key: Int) {
+        // Only the last key matters; debounce will stabilize and compute direction
         keyTrigger.update { key }
+    }
+
+    private fun computeFetchFullRangeForKey(key: Int): IntRange {
+        val pagingData = _data.value
+        val fullRange = 1..pagingData.size.coerceAtLeast(1)
+        val coercedKey = key.coerceIn(fullRange)
+
+        return if (pagingData.size > 0)
+            ((coercedKey - preloadSize)..<coercedKey + preloadSize)
+                .coerceIn(fullRange)
+        else
+            1..preloadSize
     }
 }
 

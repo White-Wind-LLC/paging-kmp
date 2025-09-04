@@ -23,7 +23,7 @@ Prerequisites: Kotlin `2.2.0`, repository `mavenCentral()`.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-core:1.0.1")
+    implementation("ua.wwind.paging:paging-core:2.0.0")
 }
 ```
 
@@ -38,13 +38,18 @@ val pager = Pager<User>(
     cacheSize = 100,
     scope = coroutineScope,
     readData = { position, loadSize ->
-        val users = repository.getUsers(position - 1, loadSize) // Convert to 0-based
-        DataPortion(
-            totalSize = repository.getTotalCount(),
-            values = users.mapIndexed { index, user ->
-                (position + index) to user
-            }.toMap()
-        )
+        kotlinx.coroutines.flow.flow {
+            val users = repository.getUsers(position - 1, loadSize) // Convert to 0-based
+            emit(
+                DataPortion(
+                    totalSize = repository.getTotalCount(),
+                    values = users.mapIndexed { index, user ->
+                        (position + index) to user
+                    }.toMap()
+                )
+            )
+            // Optionally emit more portions progressively if your source supports it
+        }
     }
 )
 
@@ -63,6 +68,17 @@ pager.flow.collect { pagingData ->
     }
 }
 ```
+
+## Positional Keys (Int)
+
+For caching and paging to work correctly, items must be addressable by an integer positional key (Int):
+
+- Use absolute 1-based positions as map keys. These keys represent the item order in your external data source for a
+  given query/filter.
+- If your backend does not provide positions, you can generate them client-side as `startPosition + indexInPortion` when
+  building `DataPortion.values`.
+- Persist items in your local cache using these absolute positions as keys so `Pager` and `PagingMediator` can merge and
+  window data reliably.
 
 ## UI Integration (Compose)
 
@@ -115,6 +131,65 @@ val mapped: PagingData<String> = pagingData.map { user -> "${user.id}: ${user.na
 // Notes:
 // - Only currently loaded items are transformed
 // - loadState and retry remain unchanged
+```
+
+## PagingMediator
+
+Coordinate a local cache with a remote source while preserving positional paging. `PagingMediator<T, Q>` emits
+`Flow<PagingData<T>>` per query, serving local data first and fetching missing ranges from the network.
+
+Key capabilities:
+
+- Emits local records first (optionally including stale ones), then remote updates
+- Detects inconsistent total sizes and refetches the requested window, clearing cache when needed
+- Optional intermediate emissions and configurable parallel fetches
+
+Define data sources:
+
+```kotlin
+class UserLocalDataSource(
+    private val dao: UserDao
+) : LocalDataSource<User> {
+    override suspend fun read(startPosition: Int, size: Int): DataPortion<User> =
+        dao.readPortion(startPosition, size)
+
+    override suspend fun save(portion: DataPortion<User>) {
+        dao.upsertPortion(portion)
+    }
+
+    override suspend fun clear() {
+        dao.clearAll()
+    }
+}
+
+class UserRemoteDataSource(
+    private val api: UserApi
+) : RemoteDataSource<User, Unit> {
+    override suspend fun fetch(startPosition: Int, size: Int, query: Unit): DataPortion<User> =
+        api.fetchUsers(startPosition, size)
+}
+```
+
+Create mediator and collect:
+
+```kotlin
+val mediator = PagingMediator(
+    scope = coroutineScope,
+    local = UserLocalDataSource(dao),
+    remote = UserRemoteDataSource(api),
+    config = PagingMediatorConfig(
+        loadSize = 20,
+        prefetchSize = 60,
+        cacheSize = 100,
+        concurrency = 2,
+        emitIntermediateResults = true
+    )
+)
+
+// Each query owns its own paging flow; use Unit if no filtering is needed
+mediator.flow(Unit).collect { pagingData ->
+    // Same UI handling as with Pager
+}
 ```
 
 ## License

@@ -11,13 +11,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.Flow
 import ua.wwind.paging.core.EntryState
 import ua.wwind.paging.core.LoadState
 import ua.wwind.paging.sample.presentation.components.EmptyState
@@ -35,18 +38,40 @@ import ua.wwind.paging.sample.scrollbar.rememberScrollbarAdapter
 @Composable
 fun UserListScreen(
     viewModel: UserListViewModel,
+    useMediator: Boolean,
+    onToggleUseMediator: (Boolean) -> Unit,
+    onRefresh: () -> Unit,
+    cachedCountFlow: Flow<Int>? = null,
+    lastMinSavedKeyFlow: Flow<Int?>? = null,
     modifier: Modifier = Modifier,
 ) {
     val pagingData by viewModel.pagingFlow.collectAsState(initial = null)
     val listState = rememberLazyListState()
+    val cachedCount: Int? = if (useMediator && cachedCountFlow != null) {
+        cachedCountFlow.collectAsState(initial = 0).value
+    } else null
+    val lastMinSavedKey: Int? = if (useMediator && lastMinSavedKeyFlow != null) {
+        lastMinSavedKeyFlow.collectAsState(initial = null).value
+    } else null
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             UserListTopBar(
                 totalUsers = pagingData?.data?.size ?: 0,
-                loadState = pagingData?.loadState ?: LoadState.Loading
+                loadState = pagingData?.loadState ?: LoadState.Loading,
+                useMediator = useMediator,
+                onUseMediatorChange = onToggleUseMediator,
+                cachedCount = cachedCount,
+                lastMinSavedKey = lastMinSavedKey
             )
+        },
+        floatingActionButton = {
+            if (useMediator) {
+                ExtendedFloatingActionButton(onClick = onRefresh) {
+                    Text("Refresh")
+                }
+            }
         }
     ) { contentPadding ->
         Box(
@@ -79,7 +104,7 @@ fun UserListScreen(
                                 val position = index + 1
                                 when (val userEntry = data.data[position]) {
                                     EntryState.Loading -> {
-                                        LoadingItem()
+                                        LoadingItem(position)
                                     }
 
                                     is EntryState.Success -> {

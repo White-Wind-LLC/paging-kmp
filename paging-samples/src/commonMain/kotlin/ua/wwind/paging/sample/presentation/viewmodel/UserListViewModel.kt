@@ -4,50 +4,57 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import ua.wwind.paging.core.DataPortion
+import ua.wwind.paging.core.LocalDataSource
 import ua.wwind.paging.core.Pager
 import ua.wwind.paging.core.PagingData
+import ua.wwind.paging.core.PagingMediator
 import ua.wwind.paging.sample.domain.model.User
-import ua.wwind.paging.sample.domain.repository.UserRepository
+import ua.wwind.paging.sample.domain.repository.UserRemoteDataSource
+import ua.wwind.paging.sample.presentation.viewmodel.adapters.UserRemoteDataSourceAdapter
 
 /**
- * ViewModel for managing user list with paging functionality
+ * ViewModel for managing user list with paging functionality.
+ * Supports two modes:
+ * - Direct: read from remote source without local cache.
+ * - Mediator: coordinate remote with a local cache via PagingMediator.
  */
 class UserListViewModel(
-    private val userRepository: UserRepository,
+    private val remote: UserRemoteDataSource,
+    private val local: LocalDataSource<User>,
+    private val useMediator: Boolean,
     scope: CoroutineScope,
 ) {
-    // Pager configuration optimized for user lists
-    private val pager = Pager<User>(
-        loadSize = 20,          // Load 20 users per request
-        preloadSize = 60,       // Preload 60 users around current position
-        cacheSize = 100,        // Keep 100 users in memory
-        scope = scope,
-        readData = ::loadUsers
-    )
+    val pagingFlow: Flow<PagingData<User>> = if (useMediator) {
+        val mediator = PagingMediator<User, Unit>(
+            scope = scope,
+            local = local,
+            remote = UserRemoteDataSourceAdapter(remote)
+        )
+        mediator.flow(Unit)
+    } else {
+        val pager = Pager<User>(
+            loadSize = 20,
+            preloadSize = 60,
+            cacheSize = 100,
+            scope = scope,
+            readData = ::loadUsersDirect
+        )
+        pager.flow
+    }
 
     /**
-     * Flow of paging data containing users and load states
+     * Clears local cache when mediator mode is active. No-op otherwise.
      */
-    val pagingFlow: Flow<PagingData<User>> = pager.flow
+    suspend fun clearCache() {
+        if (useMediator) local.clear()
+    }
 
-    /**
-     * Load users from repository and convert to DataPortion format
-     * This function is called by the Pager automatically
-     */
-    private fun loadUsers(position: Int, loadSize: Int): Flow<DataPortion<User>> = flow {
-        val offset = position - 1 // Convert from 1-based to 0-based indexing
-        val userPage = userRepository.getUsers(offset, loadSize)
-
-        // Create position-to-user mapping for the pager
-        val userMap = userPage.users.mapIndexed { index, user ->
+    private fun loadUsersDirect(position: Int, loadSize: Int): Flow<DataPortion<User>> = flow {
+        val offset = position - 1
+        val page = remote.getUsers(offset, loadSize)
+        val userMap = page.users.mapIndexed { index, user ->
             (position + index) to user
         }.toMap()
-
-        emit(
-            DataPortion(
-                totalSize = userPage.totalCount,
-                values = userMap
-            )
-        )
+        emit(DataPortion(totalSize = page.totalCount, values = userMap))
     }
 }
