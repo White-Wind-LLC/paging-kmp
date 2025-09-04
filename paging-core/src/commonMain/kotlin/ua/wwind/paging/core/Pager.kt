@@ -29,7 +29,7 @@ import kotlin.math.abs
  * @param preloadSize Number of items to preload around current position (default: 60)
  * @param cacheSize Maximum number of items to keep in memory (default: 100)
  * @param scope CoroutineScope for launching load operations
- * @param readData Suspend function to load data portions from the data source
+ * @param readData function to load data portions from the data source
  */
 @OptIn(FlowPreview::class)
 public class Pager<T>(
@@ -37,7 +37,7 @@ public class Pager<T>(
     private val preloadSize: Int = 60,
     private val cacheSize: Int = 100,
     private val scope: CoroutineScope,
-    private val readData: suspend (pos: Int, loadSize: Int) -> DataPortion<T>
+    private val readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>
 ) {
     // Reactive storage for paged data
     private val _data: MutableStateFlow<PagingMap<T>> =
@@ -94,10 +94,10 @@ public class Pager<T>(
             val coercedKey = key.coerceIn(fullRange)
 
             // Current loaded data
-            val dataMap = pagingData.values.toMutableMap()
+            val currentDataMap = pagingData.values
 
             // Find continuous range of already loaded data
-            val dataRange = findContinuousRange(dataMap)
+            val dataRange = findContinuousRange(currentDataMap)
 
             // Calculate the full range we want to have loaded around the key
             val fetchFullRange =
@@ -169,6 +169,9 @@ public class Pager<T>(
                             }
                             .sortedBy { abs(it.first - key) } // Sort by distance from requested position
 
+            // Apply cache size limit
+            val dataMap = currentDataMap.filterKeys { it in cacheRangeFromKey }.toMutableMap()
+
             // Execute loading operations
             enqueue
                 .toNonEmptyListOrNull() // Only proceed if there's something to load
@@ -177,17 +180,19 @@ public class Pager<T>(
                 }?.onEach { fetchRange ->
                     // Load each range
                     val loadSize = fetchRange.last - fetchRange.first + 1
-                    val fetchedData = readData(fetchRange.first, loadSize)
+                    readData(fetchRange.first, loadSize.toInt())
+                        .collect { portion ->
+                            // Add newly loaded data to map
+                            dataMap.putAll(portion.values)
 
-                    // Add newly loaded data to map
-                    dataMap.putAll(fetchedData.values)
+                            // Update reactive state with new data, filtering to cache range
+                            _data.value = PagingMap(
+                                size = portion.totalSize,
+                                values = dataMap,
+                                onGet = ::onGet
+                            )
+                        }
 
-                    // Update reactive state with new data, filtering to cache range
-                    _data.value = PagingMap(
-                        fetchedData.totalSize,
-                        dataMap.filterKeys { it in cacheRangeFromKey }, // Apply cache size limit
-                        onGet = ::onGet
-                    )
                 }?.also {
                     _loadState.value = LoadState.Success // Signal loading completed
                 }

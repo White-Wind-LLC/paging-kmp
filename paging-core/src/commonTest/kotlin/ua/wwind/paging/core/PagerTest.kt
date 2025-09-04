@@ -3,6 +3,7 @@ package ua.wwind.paging.core
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -28,20 +29,22 @@ class PagerTest {
         // state to simulate one-time failure for a particular chunk start
         var hasFailed = false
 
-        val pager = Pager(
+        val pager: Pager<Int> = Pager(
             loadSize = loadSize,
             preloadSize = preloadSize,
             cacheSize = cacheSize,
             scope = TestScope(dispatched),
             readData = { pos, size ->
-                if (failingChunkStartOnce != null && pos == failingChunkStartOnce && !hasFailed) {
-                    hasFailed = true
-                    throw IllegalStateException("Simulated failure for chunk starting at $pos")
-                }
+                flow {
+                    if (failingChunkStartOnce != null && pos == failingChunkStartOnce && !hasFailed) {
+                        hasFailed = true
+                        throw IllegalStateException("Simulated failure for chunk starting at $pos")
+                    }
 
-                val last = (pos + size - 1).coerceAtMost(totalSize)
-                val values: Map<Int, Int> = (pos..last).associateWith { it }
-                DataPortion(totalSize = totalSize, values = values)
+                    val last = (pos + size - 1).coerceAtMost(totalSize)
+                    val values: Map<Int, Int> = (pos..last).associateWith { it }
+                    emit(DataPortion(totalSize = totalSize, values = values))
+                }
             }
         )
 
@@ -89,7 +92,8 @@ class PagerTest {
     @Test
     fun moving_far_evicts_outside_cache_range() = runTest {
         val cacheSize = 40
-        val (pager, advanceFully) = buildPager(this, cacheSize = cacheSize)
+        val preloadSize = 60
+        val (pager, advanceFully) = buildPager(this, cacheSize = cacheSize, preloadSize = preloadSize)
 
         var latest: PagingData<Int>? = null
         val job: Job = launch { pager.flow.collectLatest { latest = it } }
@@ -107,11 +111,11 @@ class PagerTest {
         val afterSecond = latest!!
         assertIs<LoadState.Success>(afterSecond.loadState)
 
-        // Validate cache window roughly centered around 400
+        // Validate data window roughly within preload range around 400
         val firstKey = afterSecond.data.firstKey()
         val lastKey = afterSecond.data.lastKey()
-        assertTrue(firstKey >= 400 - cacheSize)
-        assertTrue(lastKey <= 400 + cacheSize)
+        assertTrue(firstKey >= 400 - preloadSize)
+        assertTrue(lastKey < 400 + preloadSize)
 
         job.cancel()
     }

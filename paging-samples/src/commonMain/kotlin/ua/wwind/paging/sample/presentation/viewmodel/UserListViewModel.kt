@@ -2,6 +2,7 @@ package ua.wwind.paging.sample.presentation.viewmodel
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import ua.wwind.paging.core.DataPortion
 import ua.wwind.paging.core.Pager
 import ua.wwind.paging.core.PagingData
@@ -33,7 +34,7 @@ class UserListViewModel(
      * Load users from repository and convert to DataPortion format
      * This function is called by the Pager automatically
      */
-    private suspend fun loadUsers(position: Int, loadSize: Int): DataPortion<User> {
+    private fun loadUsers(position: Int, loadSize: Int): Flow<DataPortion<User>> = flow {
         val offset = position - 1 // Convert from 1-based to 0-based indexing
         val userPage = userRepository.getUsers(offset, loadSize)
 
@@ -42,9 +43,11 @@ class UserListViewModel(
             (position + index) to user
         }.toMap()
 
-        return DataPortion(
-            totalSize = userPage.totalCount,
-            values = userMap
+        emit(
+            DataPortion(
+                totalSize = userPage.totalCount,
+                values = userMap
+            )
         )
     }
 }
