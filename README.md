@@ -23,7 +23,7 @@ Prerequisites: Kotlin `2.2.0`, repository `mavenCentral()`.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-core:2.0.0")
+    implementation("ua.wwind.paging:paging-core:2.0.1")
 }
 ```
 

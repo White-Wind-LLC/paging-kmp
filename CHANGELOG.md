@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.1] - 2025-09-05
+
+### Breaking Changes
+
+- `LocalDataSource` is now generic on query type and requires a query when reading:
+    - `LocalDataSource<T>` → `LocalDataSource<T, Q>`
+    - `read(startPosition: Int, size: Int)` → `read(startPosition: Int, size: Int, query: Q)`
+    - `PagingMediator<T, Q>` constructor and internals updated accordingly to pass the query to local reads.
+    - Action required: update your `LocalDataSource` implementations and call sites to include the `query` parameter.
+
+### Changed
+
+- `PagingMediator` now forwards the active query to the local data source for consistent per-query reads.
+
+### Documentation
+
+- README: clarified version catalog usage and removed redundant example to avoid duplication.
+
+### Chore
+
+- Updated `.gitignore` and removed stray `local.properties` from version control.
+
 ## [2.0.0] - 2025-09-04
 
 ### Breaking Changes
