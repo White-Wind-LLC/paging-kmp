@@ -29,7 +29,7 @@ import kotlinx.coroutines.sync.withPermit
  */
 public class PagingMediator<T, Q>(
     private val scope: CoroutineScope,
-    private val local: LocalDataSource<T>,
+    private val local: LocalDataSource<T, Q>,
     private val remote: RemoteDataSource<T, Q>,
     private val config: PagingMediatorConfig<T> = PagingMediatorConfig(),
 ) {
@@ -79,7 +79,7 @@ public class PagingMediator<T, Q>(
         val requestedRangeLast = position + size - 1
         val requestedRange = requestedRangeFirst..requestedRangeLast
 
-        val localPortion = local.read(position, size)
+        val localPortion = local.read(position, size, query)
             .let { portion ->
                 if (config.emitOutdatedRecords) emit(portion)
                 portion.copy(values = portion.values.filter { !config.isRecordStale(it.value) })
@@ -189,7 +189,7 @@ public class PagingMediator<T, Q>(
  *
  * Implementations must preserve stable positional ordering and use absolute 1-based positions as map keys.
  */
-public interface LocalDataSource<T> {
+public interface LocalDataSource<T, Q> {
     /**
      * Reads a portion starting at [startPosition] (1-based) with [size] items.
      *
@@ -199,7 +199,7 @@ public interface LocalDataSource<T> {
      * @param size Number of items to read.
      * @return [DataPortion] with present values and a total size hint (0 when unknown).
      */
-    public suspend fun read(startPosition: Int, size: Int): DataPortion<T>
+    public suspend fun read(startPosition: Int, size: Int, query: Q): DataPortion<T>
 
     /**
      * Persists or updates the supplied [portion] in the local cache.

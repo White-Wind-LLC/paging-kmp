@@ -27,6 +27,16 @@ dependencies {
 }
 ```
 
+If you are using version catalogs:
+
+```toml
+[versions]
+paging-kmp = "2.0.0"
+
+[libraries]
+paging-kmp = { module = "ua.wwind.paging:paging-core", version.ref = "paging-kmp" }
+```
+
 ## Quick Start
 
 ```kotlin
@@ -150,7 +160,7 @@ Define data sources:
 class UserLocalDataSource(
     private val dao: UserDao
 ) : LocalDataSource<User> {
-    override suspend fun read(startPosition: Int, size: Int): DataPortion<User> =
+    override suspend fun read(startPosition: Int, size: Int, query: Unit): DataPortion<User> =
         dao.readPortion(startPosition, size)
 
     override suspend fun save(portion: DataPortion<User>) {
@@ -178,11 +188,14 @@ val mediator = PagingMediator(
     local = UserLocalDataSource(dao),
     remote = UserRemoteDataSource(api),
     config = PagingMediatorConfig(
-        loadSize = 20,
-        prefetchSize = 60,
-        cacheSize = 100,
-        concurrency = 2,
-        emitIntermediateResults = true
+        loadSize = 20,                  // Number of items loaded per page
+        prefetchSize = 60,              // Number of items to preload around current position
+        cacheSize = 100,                // Max number of items to keep in memory cache
+        concurrency = 2,                // Number of concurrent fetches allowed
+        isRecordStale = { false },      // Function to check if a record is outdated
+        fetchFullRangeOnMiss = false,   // Whether to refetch full range if data is missing or inconsistent
+        emitOutdatedRecords = false,    // Emit outdated records while fetching new ones
+        emitIntermediateResults = true, // Emit partial/intermediate load results during fetch
     )
 )
 
