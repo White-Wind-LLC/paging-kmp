@@ -22,17 +22,18 @@ class PagingMediatorTest {
      * Simple in-memory LocalDataSource for tests.
      * Stores absolute-positioned values and totalSize, tracks clear/save calls.
      */
-    private class FakeLocal<T>(
+    private class FakeLocal<T, Q>(
         initialTotalSize: Int = 0,
         initialValues: Map<Int, T> = emptyMap(),
-    ) : LocalDataSource<T> {
+        query: Q,
+    ) : LocalDataSource<T, Q> {
         var totalSize: Int = initialTotalSize
         private val storage: MutableMap<Int, T> = initialValues.toMutableMap()
 
         var saveCalls: Int = 0
         var clearCalls: Int = 0
 
-        override suspend fun read(startPosition: Int, size: Int): DataPortion<T> {
+        override suspend fun read(startPosition: Int, size: Int, query: Q): DataPortion<T> {
             val last = (startPosition + size - 1)
             val slice = storage.filterKeys { it in startPosition..last }
             return DataPortion(totalSize = totalSize, values = slice)
@@ -68,7 +69,7 @@ class PagingMediatorTest {
     }
 
     private fun TestScope.buildMediator(
-        local: LocalDataSource<Item>,
+        local: LocalDataSource<Item, Unit>,
         remote: RemoteDataSource<Item, Unit>,
         config: PagingMediatorConfig<Item>,
     ): Pair<PagingMediator<Item, Unit>, suspend (Long) -> Unit> {
@@ -98,7 +99,7 @@ class PagingMediatorTest {
             4 to Item(4, stale = true),
             5 to Item(5, stale = false),
         )
-        val local = FakeLocal(initialTotalSize = 10, initialValues = localData)
+        val local = FakeLocal(initialTotalSize = 10, initialValues = localData, Unit)
 
         // Remote1 will respond after delay to allow observing local emission first
         val remote1 = FakeRemote<Item, Unit> { start, size, _ ->
@@ -147,7 +148,11 @@ class PagingMediatorTest {
 
         // Now build another mediator that emits outdated local records first
         val configEmitOutdated = config.copy(emitOutdatedRecords = true)
-        val (mediator2, _) = buildMediator(FakeLocal(10, localData), remote2, configEmitOutdated)
+        val (mediator2, _) = buildMediator(
+            FakeLocal(10, localData, Unit),
+            remote2,
+            configEmitOutdated,
+        )
 
         var latest2: PagingData<Item>? = null
         val job2: Job = launch { mediator2.flow(Unit).collectLatest { latest2 = it } }
@@ -178,7 +183,8 @@ class PagingMediatorTest {
         // Local has one item inside the requested window
         val local = FakeLocal(
             initialTotalSize = 10,
-            initialValues = mapOf(3 to Item(3))
+            initialValues = mapOf(3 to Item(3)),
+            query = Unit,
         )
 
         val remote = FakeRemote<Item, Unit> { start, size, _ ->
@@ -227,7 +233,8 @@ class PagingMediatorTest {
         // Local believes total size is 10
         val local = FakeLocal(
             initialTotalSize = 10,
-            initialValues = emptyMap<Int, Item>()
+            initialValues = emptyMap<Int, Item>(),
+            query = Unit,
         )
 
         // Remote returns a different total size (12) to trigger inconsistency
