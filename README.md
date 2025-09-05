@@ -27,16 +27,6 @@ dependencies {
 }
 ```
 
-If you are using version catalogs:
-
-```toml
-[versions]
-paging-kmp = "2.0.0"
-
-[libraries]
-paging-kmp = { module = "ua.wwind.paging:paging-core", version.ref = "paging-kmp" }
-```
-
 ## Quick Start
 
 ```kotlin
