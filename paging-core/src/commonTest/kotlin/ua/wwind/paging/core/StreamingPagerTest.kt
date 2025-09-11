@@ -14,7 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, ExperimentalStreamingPagerApi::class)
 class StreamingPagerTest {
 
     private class TestSource<T> {
