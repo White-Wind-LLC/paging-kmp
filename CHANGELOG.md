@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2025-09-12
+
+### Added
+
+- StreamingPager (experimental): streaming-first pager that:
+    - Uses a dedicated total-size flow `readTotal(): Flow<Int>` and per-range flows
+      `readPortion(start, size): Flow<Map<Int,T>>`.
+    - Opens chunk-aligned flows around the last accessed key and merges values into a bounded cache window.
+    - Closes flows gracefully when the active window moves farther than a configurable threshold.
+    - Aggregates per-range load states into a global `LoadState` (Loading > Error > Success).
+    - Configurable via `StreamingPagerConfig` (loadSize, preloadSize, cacheSize, closeThreshold, keyDebounceMs).
+- Kermit logging initialization via BuildKonfig property `LOG_LEVEL` (Debug by default; set `-PLOG_LEVEL=Info` for
+  publish).
+- Samples: added tabbed demo, including StreamingPager example with live list editing.
+- Update versions: kotlin to 2.2.10
+
+### Changed
+
+- README: added StreamingPager section with Ktor SSE usage example; installation snippet now references 2.1.0.
+
 ## [2.0.1] - 2025-09-05
 
 ### Breaking Changes

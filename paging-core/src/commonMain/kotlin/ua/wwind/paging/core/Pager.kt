@@ -111,6 +111,12 @@ public class Pager<T>(
         }
     }
 
+    public fun refresh() {
+        _data.update {
+            it.copy(values = emptyMap())
+        }
+    }
+
     /**
      * Main loading algorithm that determines what data to fetch and manages cache
      *
@@ -217,16 +223,24 @@ public class Pager<T>(
                     readData(fetchRange.first, loadSize)
                         .collect { portion ->
                             // Build a new immutable map snapshot for each emission to ensure StateFlow emits
-                            val updatedValues: Map<Int, T> = (dataMap + portion.values)
-                                .filterKeys { it in cacheRange }
-                            dataMap = updatedValues
-
-                            _data.update {
-                                PagingMap(
-                                    size = portion.totalSize,
-                                    values = updatedValues,
-                                    onGet = ::onGet
-                                )
+                            _data.update { currentData ->
+                                if (currentData.size != portion.totalSize) {
+                                    dataMap = portion.values
+                                    PagingMap(
+                                        size = portion.totalSize,
+                                        values = portion.values,
+                                        onGet = ::onGet
+                                    )
+                                } else {
+                                    val updatedValues: Map<Int, T> = (dataMap + portion.values)
+                                        .filterKeys { it in cacheRange }
+                                    dataMap = updatedValues
+                                    PagingMap(
+                                        size = portion.totalSize,
+                                        values = updatedValues,
+                                        onGet = ::onGet
+                                    )
+                                }
                             }
                         }
 

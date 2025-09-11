@@ -1,19 +1,22 @@
 [versions]
-version = "2.0.1"
-androidx-activityCompose = "1.10.1"
+version = "2.1.0"
+androidx-activityCompose = "1.11.0"
 compose = "1.8.2"
-kotlin = "2.2.0"
+kotlin = "2.2.10"
 dokka = "2.0.0"
 mavenPublish = "0.34.0"
-agp = "8.10.0"
+agp = "8.10.1"
 arrow = "2.1.2"
 kotlinx-coroutines = "1.10.2"
+kermit = "2.0.8"
+buildKonfig = "0.17.1"
 
 [libraries]
 androidx-activityCompose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
 arrow-core = { group = "io.arrow-kt", name = "arrow-core", version.ref = "arrow" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
+kermit = { module = "co.touchlab:kermit", version.ref = "kermit" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
@@ -22,3 +25,4 @@ maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPubli
 android-library = { id = "com.android.library", version.ref = "agp" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }
+buildkonfig = { id = "com.codingfeline.buildkonfig", version.ref = "buildKonfig" }

@@ -23,7 +23,7 @@ Prerequisites: Kotlin `2.2.0`, repository `mavenCentral()`.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-core:2.0.1")
+    implementation("ua.wwind.paging:paging-core:2.1.0")
 }
 ```
 
@@ -193,6 +193,87 @@ val mediator = PagingMediator(
 mediator.flow(Unit).collect { pagingData ->
     // Same UI handling as with Pager
 }
+```
+
+## StreamingPager
+
+If your data source is streaming and you can emit updates for the total item count and for individual portions
+independently, use `StreamingPager`. It opens/closes portion flows dynamically around the last accessed position, while
+a dedicated total-size flow keeps the item count in sync.
+
+- Separate streams:
+    - `readTotal(): Flow<Int>` emits global total count updates.
+    - `readPortion(start, size): Flow<Map<Int, T>>` emits only data maps for the requested range (no total).
+- Window-based, chunk-aligned opening with `config.loadSize` and preloading via `config.preloadSize`.
+- Graceful closing when the window moves farther than `config.closeThreshold` from a range.
+- Bounded cache window via `config.cacheSize`.
+- Aggregated `LoadState` across opened ranges (Loading > Error > Success).
+
+```kotlin
+@Serializable
+data class User(val id: Int, val name: String, val email: String)
+
+// Ktor HttpClient with SSE
+val client = HttpClient(CIO) {
+    install(SSE)
+    install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+}
+
+// SSE stream with total size updates (server emits integer in `data:` of each event)
+fun totalCountFlow(): Flow<Int> = flow {
+    client.sse(method = HttpMethod.Get, urlString = "https://api.example.com/users/total/stream") {
+        incoming.collect { event ->
+            val value = event.data.trim().toIntOrNull() ?: return@collect
+            emit(value)
+        }
+    }
+}
+
+// SSE stream with portion updates; server emits JSON array of users for requested range
+fun userPortionFlow(position: Int, size: Int): Flow<Map<Int, User>> = flow {
+    val url = "https://api.example.com/users/portion?start=$position&size=$size"
+    client.sse(method = HttpMethod.Get, urlString = url) {
+        incoming.collect { event ->
+            val users: List<User> = Json.decodeFromString(event.data)
+            // Map to absolute 1-based positions: position..position+size-1
+            val values: Map<Int, User> = users.mapIndexed { idx, user -> (position + idx) to user }.toMap()
+            emit(values)
+        }
+    }
+}
+
+// Create StreamingPager
+val pager = StreamingPager<User>(
+    config = StreamingPagerConfig(
+        loadSize = 20,
+        preloadSize = 60,
+        cacheSize = 100,
+        closeThreshold = 20,
+        keyDebounceMs = 300
+    ),
+    scope = coroutineScope,
+    readTotal = { totalCountFlow() },
+    readPortion = { position, size -> userPortionFlow(position, size) }
+)
+
+// Observe paging data the same way as with Pager
+pager.flow.collect { pagingData ->
+    when (pagingData.loadState) {
+        LoadState.Loading -> showLoader()
+        LoadState.Success -> hideLoader()
+        is LoadState.Error -> pagingData.retry(pagingData.loadState.key)
+    }
+
+    // Access items by 1-based position
+    when (val firstUser = pagingData.data[1]) {
+        EntryState.Loading -> showItemLoader()
+        is EntryState.Success -> displayUser(firstUser.value)
+    }
+}
+
+// Notes:
+// - Positions must be absolute and 1-based across the dataset (same as with `Pager`).
+// - When total size shrinks, the pager cancels out-of-bounds flows and prunes cached values automatically.
 ```
 
 ## License

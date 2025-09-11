@@ -1,11 +1,11 @@
 @file:OptIn(ExperimentalWasmDsl::class)
-
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 
 plugins {
     kotlin("multiplatform")
     alias(libs.plugins.maven.publish)
     alias(libs.plugins.android.library)
+    alias(libs.plugins.buildkonfig)
 }
 
 kotlin {
@@ -32,6 +32,7 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.arrow.core)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kermit)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -109,4 +110,14 @@ tasks.register<org.gradle.jvm.tasks.Jar>("javadocJar") {
 // Ensure build fails if tests fail
 tasks.named("build").configure {
     dependsOn("check")
+}
+
+buildkonfig {
+    packageName = "ua.wwind.paging.core"
+    defaultConfigs {
+        val logLevel: String = providers.gradleProperty("LOG_LEVEL").orNull
+            ?: providers.environmentVariable("LOG_LEVEL").orNull
+            ?: "Debug"
+        buildConfigField(com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING, "LOG_LEVEL", logLevel)
+    }
 }

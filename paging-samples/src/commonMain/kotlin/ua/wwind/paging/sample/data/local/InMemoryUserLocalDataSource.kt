@@ -9,7 +9,7 @@ import ua.wwind.paging.sample.domain.model.User
 /**
  * Simple in-memory implementation of [LocalDataSource] for users backed by [MutableStateFlow].
  */
-class InMemoryUserLocalDataSource : LocalDataSource<User> {
+class InMemoryUserLocalDataSource : LocalDataSource<User, Unit> {
     private val positionToUser = MutableStateFlow<Map<Int, User>>(emptyMap())
     private val totalSizeFlow = MutableStateFlow(0)
     private val _cachedCount = MutableStateFlow(0)
@@ -17,7 +17,7 @@ class InMemoryUserLocalDataSource : LocalDataSource<User> {
     private val _lastSavedMinKey = MutableStateFlow<Int?>(null)
     val lastSavedMinKey: StateFlow<Int?> = _lastSavedMinKey
 
-    override suspend fun read(startPosition: Int, size: Int): DataPortion<User> {
+    override suspend fun read(startPosition: Int, size: Int, query: Unit): DataPortion<User> {
         val end = startPosition + size - 1
         val snapshot = positionToUser.value
         val values = (startPosition..end)

@@ -20,7 +20,7 @@ import ua.wwind.paging.sample.presentation.viewmodel.adapters.UserRemoteDataSour
  */
 class UserListViewModel(
     private val remote: UserRemoteDataSource,
-    private val local: LocalDataSource<User>,
+    private val local: LocalDataSource<User, Unit>,
     private val useMediator: Boolean,
     scope: CoroutineScope,
 ) {
