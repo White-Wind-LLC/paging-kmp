@@ -18,7 +18,7 @@ support.
 
 ## Installation
 
-Prerequisites: Kotlin `2.2.0`, repository `mavenCentral()`.
+Prerequisites: Kotlin `2.2.10`, repository `mavenCentral()`.
 
 ```kotlin
 // build.gradle.kts
