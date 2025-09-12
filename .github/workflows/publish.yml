@@ -28,9 +28,6 @@ jobs:
       - name: Upgrade Kotlin Yarn lockfiles
         run: ./gradlew --no-daemon -PexcludeSamples=true kotlinUpgradeYarnLock
 
-      - name: Build
-        run: ./gradlew --no-daemon -PexcludeSamples=true -PLOG_LEVEL=Info clean :paging-core:build
-
       - name: Decode GPG private key (base64)
         run: |
           echo "${SIGNING_IN_MEMORY_KEY_BASE64}" | base64 --decode > /tmp/signing-key.asc
