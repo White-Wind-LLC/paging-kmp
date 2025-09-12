@@ -13,8 +13,7 @@ class UserRemoteDataSourceAdapter(
 ) : RemoteDataSource<User, Unit> {
 
     override suspend fun fetch(startPosition: Int, size: Int, query: Unit): DataPortion<User> {
-        val offset = startPosition - 1
-        val page = remote.getUsers(offset, size)
+        val page = remote.getUsers(startPosition, size)
         val values = page.users.mapIndexed { index, user ->
             (startPosition + index) to user
         }.toMap()

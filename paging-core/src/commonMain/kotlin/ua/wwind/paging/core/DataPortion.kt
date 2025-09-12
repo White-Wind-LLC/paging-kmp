@@ -16,13 +16,12 @@ package ua.wwind.paging.core
  *
  * Design considerations:
  * - Uses Map<Int, T> for O(1) lookup performance
- * - Positions are 1-based to match common UI patterns
  * - Supports sparse data (gaps in positions are allowed)
  * - Immutable design for thread safety
  *
  * @param T The type of items being paged
  * @param totalSize Total number of items available in the complete dataset
- * @param values Map of position (1-based) to loaded items
+ * @param values Map of position to loaded items
  */
 public data class DataPortion<T>(
     val totalSize: Int,

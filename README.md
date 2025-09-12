@@ -18,12 +18,12 @@ support.
 
 ## Installation
 
-Prerequisites: Kotlin `2.2.10`, repository `mavenCentral()`.
+Prerequisites: Kotlin `2.2.20`, repository `mavenCentral()`.
 
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-core:2.1.2")
+    implementation("ua.wwind.paging:paging-core:2.2.0")
 }
 ```
 
@@ -39,7 +39,7 @@ val pager = Pager<User>(
     scope = coroutineScope,
     readData = { position, loadSize ->
         kotlinx.coroutines.flow.flow {
-            val users = repository.getUsers(position - 1, loadSize) // Convert to 0-based
+            val users = repository.getUsers(position, loadSize)
             emit(
                 DataPortion(
                     totalSize = repository.getTotalCount(),
@@ -60,9 +60,9 @@ pager.flow.collect { pagingData ->
         LoadState.Success -> hideLoader()
         is LoadState.Error -> pagingData.retry(pagingData.loadState.key)
     }
-    
-    // Access items by position (1-based indexing)
-    when (val firstUser = pagingData.data[1]) {
+
+    // Access items by position
+    when (val firstUser = pagingData.data[0]) {
         EntryState.Loading -> showItemLoader()
         is EntryState.Success -> displayUser(firstUser.value)
     }
@@ -73,7 +73,7 @@ pager.flow.collect { pagingData ->
 
 For caching and paging to work correctly, items must be addressable by an integer positional key (Int):
 
-- Use absolute 1-based positions as map keys. These keys represent the item order in your external data source for a
+- Use absolute positions as map keys. These keys represent the item order in your external data source for a
   given query/filter.
 - If your backend does not provide positions, you can generate them client-side as `startPosition + indexInPortion` when
   building `DataPortion.values`.
@@ -89,8 +89,7 @@ fun UserList() {
 
     LazyColumn {
         items(count = pagingData.data.size) { index ->
-            val position = index + 1
-            when (val entry = pagingData.data[position]) {
+            when (val entry = pagingData.data[index]) {
                 EntryState.Loading -> LoadingItem()
                 is EntryState.Success -> UserItem(entry.value)
             }
@@ -235,7 +234,7 @@ fun userPortionFlow(position: Int, size: Int): Flow<Map<Int, User>> = flow {
     client.sse(method = HttpMethod.Get, urlString = url) {
         incoming.collect { event ->
             val users: List<User> = Json.decodeFromString(event.data)
-            // Map to absolute 1-based positions: position..position+size-1
+            // Map to absolute positions: position..position+size-1
             val values: Map<Int, User> = users.mapIndexed { idx, user -> (position + idx) to user }.toMap()
             emit(values)
         }
@@ -264,15 +263,15 @@ pager.flow.collect { pagingData ->
         is LoadState.Error -> pagingData.retry(pagingData.loadState.key)
     }
 
-    // Access items by 1-based position
-    when (val firstUser = pagingData.data[1]) {
+    // Access items by position
+    when (val firstUser = pagingData.data[0]) {
         EntryState.Loading -> showItemLoader()
         is EntryState.Success -> displayUser(firstUser.value)
     }
 }
 
 // Notes:
-// - Positions must be absolute and 1-based across the dataset (same as with `Pager`).
+// - Positions must be absolute across the dataset (same as with `Pager`).
 // - When total size shrinks, the pager cancels out-of-bounds flows and prunes cached values automatically.
 ```
 

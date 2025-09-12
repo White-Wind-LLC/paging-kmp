@@ -50,8 +50,7 @@ class UserListViewModel(
     }
 
     private fun loadUsersDirect(position: Int, loadSize: Int): Flow<DataPortion<User>> = flow {
-        val offset = position - 1
-        val page = remote.getUsers(offset, loadSize)
+        val page = remote.getUsers(position, loadSize)
         val userMap = page.users.mapIndexed { index, user ->
             (position + index) to user
         }.toMap()

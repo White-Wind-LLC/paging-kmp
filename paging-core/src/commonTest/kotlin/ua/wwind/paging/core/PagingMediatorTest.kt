@@ -93,11 +93,11 @@ class PagingMediatorTest {
 
     @Test
     fun local_stale_records_are_filtered_by_default_and_can_emit_outdated_when_enabled() = runTest {
-        // Local has 3 items in the requested window, with one stale entry at position 4
+        // Local has 3 items in the requested window, with one stale entry at position 3
         val localData = mapOf(
-            3 to Item(3, stale = false),
-            4 to Item(4, stale = true),
-            5 to Item(5, stale = false),
+            2 to Item(2, stale = false),
+            3 to Item(3, stale = true),
+            4 to Item(4, stale = false),
         )
         val local = FakeLocal(initialTotalSize = 10, initialValues = localData, Unit)
 
@@ -134,8 +134,8 @@ class PagingMediatorTest {
         val job: Job = launch { mediator.flow(Unit).collectLatest { latest = it } }
         this.testScheduler.runCurrent()
 
-        // Trigger load in window 1..5 by accessing position 4
-        latest!!.data[4]
+        // Trigger load in window 0..4 by accessing position 3
+        latest!!.data[3]
 
         // Advance only past debounce, then run current tasks to process local emission
         this.testScheduler.advanceTimeBy(300)
@@ -144,7 +144,7 @@ class PagingMediatorTest {
         // At this moment, only local portion was emitted, remote is still delayed
         val afterLocal = latest!!
         assertIs<LoadState.Loading>(afterLocal.loadState)
-        assertIs<EntryState.Loading>(afterLocal.data[4])
+        assertIs<EntryState.Loading>(afterLocal.data[3])
 
         // Now build another mediator that emits outdated local records first
         val configEmitOutdated = config.copy(emitOutdatedRecords = true)
@@ -158,7 +158,7 @@ class PagingMediatorTest {
         val job2: Job = launch { mediator2.flow(Unit).collectLatest { latest2 = it } }
         this.testScheduler.runCurrent()
 
-        latest2!!.data[4]
+        latest2!!.data[3]
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.runCurrent()
 
@@ -167,12 +167,12 @@ class PagingMediatorTest {
         val afterRemote = latest!!
         assertIs<LoadState.Success>(afterRemote.loadState)
         // All positions in requested range should now be loaded
-        (1..5).forEach { pos ->
+        (0..4).forEach { pos ->
             assertIs<EntryState.Success<Item>>(afterRemote.data[pos])
         }
-        // Verify remote1 fetched missing ranges: 1..2 and 4..4 (allowing duplicates)
-        assertTrue(remote1.callArgs.contains(1 to 2))
-        assertTrue(remote1.callArgs.contains(4 to 1))
+        // Verify remote1 fetched missing ranges: 0..1 and 3..3 (allowing duplicates)
+        assertTrue(remote1.callArgs.contains(0 to 2))
+        assertTrue(remote1.callArgs.contains(3 to 1))
 
         job.cancel()
         job2.cancel()
@@ -183,7 +183,7 @@ class PagingMediatorTest {
         // Local has one item inside the requested window
         val local = FakeLocal(
             initialTotalSize = 10,
-            initialValues = mapOf(3 to Item(3)),
+            initialValues = mapOf(2 to Item(2)),
             query = Unit,
         )
 
@@ -211,19 +211,19 @@ class PagingMediatorTest {
         val job: Job = launch { mediator.flow(Unit).collectLatest { latest = it } }
         this.testScheduler.runCurrent()
 
-        // Access key=1 to avoid an extra initial load due to initial keyTrigger value
-        // With loadSize=5, startFetchRange should be 1..5
-        latest!!.data[1]
+        // Access key=0 to avoid an extra initial load due to initial keyTrigger value
+        // With loadSize=5, startFetchRange should be 0..4
+        latest!!.data[0]
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.runCurrent()
 
-        // With key=1 and loadSize=5 on empty state, Pager enqueues two ranges (1..4) and (5..9)
+        // With key=0 and loadSize=5 on empty state, Pager enqueues two ranges (0..3) and (4..8)
         // Verify mediator fetched each whole requested range (no sub-splitting)
-        assertEquals(listOf(1 to 4, 5 to 5), remote.callArgs.distinct())
+        assertEquals(listOf(0 to 4, 4 to 5), remote.callArgs.distinct())
 
         val after = latest!!
         assertIs<LoadState.Success>(after.loadState)
-        (1..5).forEach { pos -> assertIs<EntryState.Success<Item>>(after.data[pos]) }
+        (0..4).forEach { pos -> assertIs<EntryState.Success<Item>>(after.data[pos]) }
 
         job.cancel()
     }
@@ -264,8 +264,8 @@ class PagingMediatorTest {
         val job: Job = launch { mediator.flow(Unit).collectLatest { latest = it } }
         this.testScheduler.runCurrent()
 
-        // Trigger load for window 1..5
-        latest!!.data[2]
+        // Trigger load for window 0..4
+        latest!!.data[1]
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.runCurrent()
 
@@ -277,7 +277,7 @@ class PagingMediatorTest {
         assertIs<LoadState.Success>(after.loadState)
         // Size should now reflect remote's size (12)
         assertEquals(12, after.data.size)
-        (1..5).forEach { pos -> assertIs<EntryState.Success<Item>>(after.data[pos]) }
+        (0..4).forEach { pos -> assertIs<EntryState.Success<Item>>(after.data[pos]) }
 
         job.cancel()
     }

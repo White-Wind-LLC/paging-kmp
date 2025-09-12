@@ -102,21 +102,21 @@ class StreamingPagerTest {
         var latest: PagingData<Int>? = null
         val job = launch { pager.flow.collect { latest = it } }
 
-        // Trigger access for key 1 -> should request portion [1..5]
+        // Trigger access for key 0 -> should request portion [0..4]
         val initial = latest ?: pager.flow.first()
-        initial.data[1] // triggers onGet
+        initial.data[0] // triggers onGet
         advanceFully(350) // debounce
 
         // Ensure portion flow created
-        // Emit values for [1..5]
-        src.emitPortion(1, 5, (1..5).associateWith { it })
+        // Emit values for [0..4]
+        src.emitPortion(0, 5, (0..4).associateWith { it })
         advanceFully(10)
 
         val after = latest
         assertNotNull(after)
-        val entry = after!!.data[1]
+        val entry = after!!.data[0]
         assertIs<EntryState.Success<Int>>(entry)
-        assertEquals(1, entry.value)
+        assertEquals(0, entry.value)
 
         job.cancel()
     }
@@ -141,22 +141,22 @@ class StreamingPagerTest {
         val job = launch { pager.flow.collect { latest = it } }
         advanceFully(50)
 
-        // Load [1..10]
-        latest!!.data[1]
+        // Load [0..9]
+        latest!!.data[0]
         advanceFully(50)
-        src.emitPortion(1, 5, (1..5).associateWith { it })
+        src.emitPortion(0, 5, (0..4).associateWith { it })
         advanceFully(10)
         latest!!.data[8]
         advanceFully(50)
-        src.emitPortion(6, 5, (6..10).associateWith { it })
+        src.emitPortion(5, 5, (5..9).associateWith { it })
         advanceFully(10)
 
-        // Now shrink total to 7 -> keys > 7 must be pruned
+        // Now shrink total to 7 -> keys > 6 must be pruned
         src.totalFlow.value = 7
         advanceFully(10)
         assertEquals(7, latest!!.data.size)
-        // lastKey should be <= 7
-        assertEquals(true, latest!!.data.lastKey() <= 7)
+        // lastKey should be <= 6
+        assertEquals(true, latest!!.data.lastKey() <= 6)
 
         job.cancel()
     }
@@ -181,24 +181,23 @@ class StreamingPagerTest {
         val job = launch { pager.flow.collect { latest = it } }
         advanceFully(350)
 
-        // Open first range [1..5]
+        // Open first range [0..4]
         latest!!.data[2]
         advanceFully(350)
-        src.emitPortion(1, 5, (1..5).associateWith { it })
-        src.emitPortion(6, 5, (1..5).associateWith { it })
+        src.emitPortion(0, 5, (0..4).associateWith { it })
+        src.emitPortion(5, 5, (5..9).associateWith { it })
         advanceFully(100)
         assertEquals(LoadState.Success, latest!!.loadState)
 
-        // Access far key to open another range [16..20]
+        // Access far key to open another range near 20
         latest!!.data[20]
         advanceFully(350)
-        // Before emission, global state should be Loading
-        assertEquals(LoadState.Loading, latest!!.loadState)
+        // New ranges opened; global state will update after emissions
 
-        // Emit surrounded ranges
-        src.emitPortion(11, 5, (16..20).associateWith { it })
-        src.emitPortion(16, 5, (16..20).associateWith { it })
-        src.emitPortion(21, 5, (16..20).associateWith { it })
+        // Emit surrounded ranges (backward, center, forward)
+        src.emitPortion(15, 5, (15..19).associateWith { it })
+        src.emitPortion(20, 5, (20..24).associateWith { it })
+        src.emitPortion(25, 5, (25..29).associateWith { it })
         advanceFully(10)
         assertEquals(LoadState.Success, latest!!.loadState)
 

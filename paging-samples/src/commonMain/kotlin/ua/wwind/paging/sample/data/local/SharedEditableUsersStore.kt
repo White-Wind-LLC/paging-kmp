@@ -11,13 +11,12 @@ import ua.wwind.paging.sample.domain.model.UserRole
 
 /**
  * In-memory editable store with a backing MutableList and a StateFlow that emits on any change.
- * Positions are 1-based.
  */
 class SharedEditableUsersStore(initialSize: Int = 200) {
     private val users: MutableList<User> = MutableList(initialSize) { index ->
         val id = index + 1
         User(
-            id = id,
+            id = index,
             firstName = "User$" + id,
             lastName = "Sample",
             email = "user$id@example.com",
@@ -37,37 +36,35 @@ class SharedEditableUsersStore(initialSize: Int = 200) {
         usersFlow
             .mapLatest { list ->
                 val total = list.size
-                val startIndex = (startPosition - 1).coerceAtLeast(0)
+                val startIndex = startPosition.coerceAtLeast(0)
                 val endIndexExclusive = (startIndex + size).coerceAtMost(total)
-                if (startIndex in 0 until total) list.subList(startIndex, endIndexExclusive) else emptyList()
+                if (startIndex in 0 ..< total) list.subList(startIndex, endIndexExclusive) else emptyList()
             }.distinctUntilChanged()
             .map { slice ->
                 slice.mapIndexed { idx, user -> (startPosition + idx) to user }.toMap()
             }
 
     fun updateAt(position: Int, transform: (User) -> User) {
-        val index = position - 1
-        if (index in users.indices) {
-            users[index] = transform(users[index])
+        if (position in users.indices) {
+            users[position] = transform(users[position])
             usersFlow.value = users.toList()
         }
     }
 
     fun addAt(position: Int, user: User) {
-        val index = (position - 1).coerceIn(0, users.size)
+        val index = position.coerceIn(0, users.size)
         users.add(index, user)
         usersFlow.value = users.toList()
     }
 
     fun removeAt(position: Int) {
-        val index = position - 1
-        if (index in users.indices) {
-            users.removeAt(index)
+        if (position in users.indices) {
+            users.removeAt(position)
             usersFlow.value = users.toList()
         }
     }
 
     fun totalSize(): Int = users.size
 
-    fun userAt(position: Int): User? = users.getOrNull(position - 1)
+    fun userAt(position: Int): User? = users.getOrNull(position)
 }

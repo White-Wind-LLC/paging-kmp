@@ -83,7 +83,7 @@ class PagerTest {
         assertEquals(target, entry.value)
 
         // Some data around the target should be present within preload window
-        assertTrue(after.data.firstKey() > 0)
+        assertTrue(after.data.firstKey() >= 0)
         assertTrue(after.data.lastKey() >= target)
 
         job.cancel()

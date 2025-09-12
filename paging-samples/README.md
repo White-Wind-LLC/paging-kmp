@@ -26,13 +26,12 @@ Pager<User>(
 ```kotlin
 // Repository to Pager data conversion
 private suspend fun loadUsers(position: Int, loadSize: Int): DataPortion<User> {
-    val offset = position - 1 // Convert from 1-based to 0-based
-    val userPage = userRepository.getUsers(offset, loadSize)
-    
+    val userPage = userRepository.getUsers(position, loadSize)
+
     val userMap = userPage.users.mapIndexed { index, user ->
         (position + index) to user
     }.toMap()
-    
+
     return DataPortion(
         totalSize = userPage.totalCount,
         values = userMap
@@ -47,8 +46,7 @@ val pagingData by viewModel.pagingFlow.collectAsState()
 
 LazyColumn {
     items(count = data.data.size) { index ->
-        val position = index + 1
-        when (val entry = data.data[position]) {
+        when (val entry = data.data[index]) {
             EntryState.Loading -> LoadingItem()
             is EntryState.Success -> UserCard(entry.value)
         }
@@ -71,7 +69,7 @@ LazyColumn {
 
 ## Key Points
 
-1. **1-based indexing**: Pager uses 1-based positions internally
+1. **Positional keys**: Pager uses integer positions internally
 2. **Automatic loading**: Items load as you scroll, with intelligent preloading
 3. **Memory management**: Cache automatically removes distant items
 4. **Error handling**: Network errors show retry overlay

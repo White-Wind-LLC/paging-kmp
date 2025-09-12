@@ -99,12 +99,11 @@ fun UserListScreen(
                         ) {
                             items(
                                 count = data.data.size,
-                                key = { index -> index + 1 } // 1-based indexing
+                                key = { it }
                             ) { index ->
-                                val position = index + 1
-                                when (val userEntry = data.data[position]) {
+                                when (val userEntry = data.data[index]) {
                                     EntryState.Loading -> {
-                                        LoadingItem(position)
+                                        LoadingItem(index)
                                     }
 
                                     is EntryState.Success -> {

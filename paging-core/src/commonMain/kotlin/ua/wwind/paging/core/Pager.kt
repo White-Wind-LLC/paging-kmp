@@ -61,10 +61,10 @@ public class Pager<T>(
     private enum class Direction { Increase, Decrease }
 
     // Debounced trigger for the last accessed key only
-    private val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(1)
+    private val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(0)
 
     // Track the last position that was requested for optimization
-    private var lastReadKey: Int = 0
+    private var lastReadKey: Int = -1
 
     // Active loading job and its planned range; used to prevent duplicate loads and support cancellation
     private var currentLoadJob: Job? = null
@@ -77,8 +77,9 @@ public class Pager<T>(
                 .debounce(300) // Wait 300ms for rapid position changes to settle
                 .distinctUntilChanged() // Ignore duplicate keys
                 .collect { key ->
-                    if (key <= 0) return@collect
-                    val direction = if (lastReadKey > 0 && key < lastReadKey) Direction.Increase else Direction.Decrease
+                    if (key < 0) return@collect
+                    val direction =
+                        if (lastReadKey >= 0 && key < lastReadKey) Direction.Increase else Direction.Decrease
 
                     // Compute the range that would be loaded for this key based on current state
                     val plannedRange = computeFetchFullRangeForKey(key)
@@ -131,8 +132,8 @@ public class Pager<T>(
         try {
             val pagingData = _data.value
 
-            // Calculate the valid range of positions (1-based indexing)
-            val fullRange = 1..pagingData.size.coerceAtLeast(1)
+            // Calculate the valid range of positions
+            val fullRange = 0..<pagingData.size.coerceAtLeast(1)
             val coercedKey = key.coerceIn(fullRange)
 
             // Current loaded data
@@ -149,7 +150,7 @@ public class Pager<T>(
                         .coerceIn(fullRange)
                 else
                 // Initial load case: load from beginning
-                    1..preloadSize
+                    0..<loadSize
 
             // Update the currently loading range to reflect the actual computation at runtime
             currentLoadingRange = fetchFullRange
@@ -178,7 +179,7 @@ public class Pager<T>(
                 val pieceCount = piece.count()
                 when {
                     piece.first == fetchFullRange.first && pieceCount < loadSize -> {
-                        val start = (piece.first - (loadSize - pieceCount)).coerceAtLeast(1)
+                        val start = (piece.first - (loadSize - pieceCount)).coerceAtLeast(0)
                         start..piece.last
                     }
 
@@ -291,7 +292,7 @@ public class Pager<T>(
      * Called when UI accesses a specific position
      * Triggers debounced loading for that position
      *
-     * @param key The position being accessed (1-based)
+     * @param key The position being accessed
      */
     private fun onGet(key: Int) {
         // Only the last key matters; debounce will stabilize and compute direction
@@ -300,14 +301,14 @@ public class Pager<T>(
 
     private fun computeFetchFullRangeForKey(key: Int): IntRange {
         val pagingData = _data.value
-        val fullRange = 1..pagingData.size.coerceAtLeast(1)
+        val fullRange = 0..<pagingData.size.coerceAtLeast(1)
         val coercedKey = key.coerceIn(fullRange)
 
         return if (pagingData.size > 0)
             ((coercedKey - preloadSize)..<coercedKey + preloadSize)
                 .coerceIn(fullRange)
         else
-            1..preloadSize
+            0..<loadSize
     }
 }
 

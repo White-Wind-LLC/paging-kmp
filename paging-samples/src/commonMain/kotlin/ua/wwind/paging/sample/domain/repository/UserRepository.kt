@@ -8,7 +8,7 @@ import ua.wwind.paging.sample.domain.model.User
 interface UserRemoteDataSource {
     /**
      * Get users with pagination support from a remote source.
-     * @param offset Starting position (0-based)
+     * @param offset Starting position
      * @param limit Number of users to fetch
      * @return List of users and total count
      */

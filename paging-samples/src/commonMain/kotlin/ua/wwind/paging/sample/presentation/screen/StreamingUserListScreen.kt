@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -53,7 +52,7 @@ fun StreamingUserListScreen(
         ) {
             Text("Editor", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val addPosState = remember { mutableStateOf(1) }
+                val addPosState = remember { mutableStateOf(0) }
                 Button(onClick = {
                     val pos = addPosState.value
                     viewModel.addUserAt(position = pos, user = viewModel.userAt(pos) ?: return@Button)
@@ -62,7 +61,7 @@ fun StreamingUserListScreen(
 
             val previewCount = viewModel.totalSize()
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items((1..previewCount).toList()) { pos ->
+                items(previewCount) { pos ->
                     val user = viewModel.userAt(pos)
                     if (user != null) {
                         Card(Modifier.fillMaxWidth().padding(2.dp)) {
@@ -101,10 +100,9 @@ fun StreamingUserListScreen(
                             ),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(count = data.data.size, key = { it + 1 }) { index ->
-                                val position = index + 1
-                                when (val entry = data.data[position]) {
-                                    EntryState.Loading -> LoadingItem(position)
+                            items(count = data.data.size, key = { it }) { index ->
+                                when (val entry = data.data[index]) {
+                                    EntryState.Loading -> LoadingItem(index)
                                     is EntryState.Success -> UserCard(user = entry.value)
                                 }
                             }

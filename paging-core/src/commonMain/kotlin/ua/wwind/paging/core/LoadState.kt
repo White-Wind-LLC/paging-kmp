@@ -37,7 +37,7 @@ public sealed interface LoadState {
      * different positions that might load successfully.
      *
      * @param throwable The exception that caused the loading failure
-     * @param key The position (1-based) that was being loaded when the error occurred
+     * @param key The position that was being loaded when the error occurred
      */
     public data class Error(val throwable: Throwable, val key: Int) : LoadState
 

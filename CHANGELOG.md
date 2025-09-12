@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2025-09-13
+
+### Breaking Changes
+
+- Positions are now treated consistently as zero-based across the library. This affects `Pager`, `PagingMediator`,
+  `StreamingPager`, and all sample code. If you previously used one-based positions, remove any `+1`/`-1` conversions at
+  call sites and in your data mappers.
+- `PagingMap.firstKey()`/`lastKey()` now return `-1` when no data is loaded (was `0`). Use `>= 0` to check for presence.
+
+### Changed
+
+- Internal logic, tests, and samples updated to use zero-based positions; docs and KDoc wording made neutral (no
+  explicit mention of indexing base) to match common developer expectations.
+- `StreamingPager` startup and window alignment now operate from position `0` for empty-state initialization.
+- README examples updated for the new positional semantics and simplified wording.
+- Build tooling updates: Kotlin 2.2.20, Gradle 9.0.0.
+
+### Fixed
+
+- Stabilized `StreamingPagerTest` expectations around range alignment and emissions across platforms.
+
+### Migration Guide
+
+- Remove any `position - 1` or `index + 1` conversions in your UI and data adapters. Keys passed to and emitted by the
+  library should be absolute zero-based positions.
+- When checking `firstKey()`/`lastKey()`, treat `-1` as “no data yet”.
+
 ## [2.1.0] - 2025-09-12
 
 ### Added

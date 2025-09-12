@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.floor
 
@@ -39,7 +41,7 @@ public data class StreamingPagerConfig(
  * - Portion streams `readPortion(start, size)` emit only data maps (no totals) which are merged into a bounded cache window.
  * - The active window is computed around the last accessed key; chunk-aligned flows of size [loadSize] are opened/kept as needed.
  * - Flows are closed only when the active window moves farther than [closeThreshold] from a flow's bounds.
- * - When the total size shrinks, out-of-bounds flows are cancelled and in-memory data is pruned to [1..total].
+ * - When the total size shrinks, out-of-bounds flows are cancelled and in-memory data is pruned to the valid range.
  * - Exposes a single `Flow<PagingData<T>>` with a global `LoadState` aggregated from per-range states (priority: Loading > Error > Success).
  *
  * @param loadSize Maximum number of items per opened portion flow.
@@ -83,9 +85,9 @@ public class StreamingPager<T>(
         PagingData(data, loadState, ::onGet)
     }
 
-    private val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(1)
-    private var lastReadKey: Int = 1
-    private var previousKey: Int = 1
+    private val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(0)
+    private var lastReadKey: Int = 0
+    private var previousKey: Int = 0
 
     // Active range collectors keyed by their inclusive range
     private val activeStreams: MutableMap<IntRange, Job> = LinkedHashMap()
@@ -96,8 +98,8 @@ public class StreamingPager<T>(
     private val logger = Logger(
         StaticConfig(
             minSeverity = runCatching { Severity.valueOf(BuildKonfig.LOG_LEVEL) }
-            .getOrDefault(Severity.Debug)
-    )).withTag("StreamingPager")
+                .getOrDefault(Severity.Debug)
+        )).withTag("StreamingPager")
 
     init {
         require(config.loadSize > 0) { "loadSize must be > 0" }
@@ -114,7 +116,7 @@ public class StreamingPager<T>(
                     val emptyBefore = _data.value.size == 0
                     onTotalChanged(newTotal)
                     if (emptyBefore && newTotal > 0) {
-                        tryAdjustStreamsForKey(1)
+                        tryAdjustStreamsForKey(0)
                     }
                 }
         }
@@ -125,9 +127,9 @@ public class StreamingPager<T>(
                 .distinctUntilChanged()
                 .collect { key ->
                     logger.d { "keyTrigger: key=$key" }
-                    if (key <= 0) return@collect
+                    if (key < 0) return@collect
                     tryAdjustStreamsForKey(key)
-                    logger.d { "active flows: ${activeStreams.size} for ranges: ${activeStreams.keys}" }
+                    logger.d { "active flows: ${activeStreams.size} for ranges: ${activeStreams.keys.sortedBy { it.first }}" }
                 }
         }
     }
@@ -150,13 +152,13 @@ public class StreamingPager<T>(
 
         // 3) Compute window and target chunks adapting to already opened alignment
         val targetChunks: List<IntRange> = if (totalSize == 0) {
-            listOf(1..config.loadSize)
+            listOf(0..<config.loadSize)
         } else {
             val windowForKeyAligned = computeWindowForKeyAligned(key, totalSize) // Example: 100..140
             val keepers =
                 activeStreams.keys.filter { it.intersects(windowForKeyAligned) } // Example: [93..112, 113..132]
             val baseStart = keepers.minByOrNull { abs(it.first - key) }?.first
-                ?: alignedChunkStartForKey(key, baseStart = 1) // Example: 113
+                ?: alignedChunkStartForKey(key, baseStart = 0) // Example: 113
 
             val centerChunk = alignedChunkContaining(key, baseStart, totalSize) // Example: 113..132
             val window = computeWindowAroundCenter(centerChunk, totalSize) // Example: 93..152
@@ -176,7 +178,7 @@ public class StreamingPager<T>(
             val forward = mutableListOf<IntRange>().apply { // Example result: [133..152]
                 var start = centerChunk.first + config.loadSize
                 while (start <= window.last) {
-                    val end = (start + config.loadSize - 1).coerceAtMost(totalSize)
+                    val end = (start + config.loadSize - 1).coerceAtMost(totalSize - 1)
                     add(start..end)
                     start += config.loadSize
                 }
@@ -184,8 +186,8 @@ public class StreamingPager<T>(
 
             val backward = buildList { // Example result: [93..112]
                 var start = centerChunk.first - config.loadSize
-                while (start + config.loadSize - 1 >= window.first && start >= 1) {
-                    val end = (start + config.loadSize - 1).coerceAtMost(totalSize)
+                while (start + config.loadSize - 1 >= window.first && start >= 0) {
+                    val end = (start + config.loadSize - 1).coerceAtMost(totalSize - 1)
                     add(start..end)
                     start -= config.loadSize
                 }
@@ -224,7 +226,7 @@ public class StreamingPager<T>(
     }
 
     private fun computeWindowForKeyAligned(key: Int, totalSize: Int): IntRange {
-        val full = 1..totalSize.coerceAtLeast(1)
+        val full = 0..<totalSize.coerceAtLeast(1)
         val centered = key.coerceIn(full)
         val start = (centered - config.preloadSize).coerceAtLeast(full.first)
         val end = (centered + config.preloadSize).coerceAtMost(full.last)
@@ -232,7 +234,7 @@ public class StreamingPager<T>(
     }
 
     private fun computeWindowAroundCenter(centerChunk: IntRange, totalSize: Int): IntRange {
-        val full = 1..totalSize.coerceAtLeast(1)
+        val full = 0..<totalSize.coerceAtLeast(1)
         val start = (centerChunk.first - config.preloadSize).coerceAtLeast(full.first)
         val end = (centerChunk.last + config.preloadSize).coerceAtMost(full.last)
         return start..end
@@ -245,9 +247,9 @@ public class StreamingPager<T>(
     }
 
     private fun alignedChunkContaining(key: Int, baseStart: Int, totalSize: Int): IntRange {
-        val start = alignedChunkStartForKey(key, baseStart).coerceAtLeast(1)
-        val end = (start + config.loadSize - 1).coerceAtMost(totalSize)
-        return start..end
+        val start = alignedChunkStartForKey(key, baseStart).coerceAtLeast(0)
+        val end = (start + config.loadSize).coerceAtMost(totalSize.coerceAtLeast(1))
+        return start..<end
     }
 
     private fun cleanupInactiveStreamsLocked() {
@@ -280,19 +282,24 @@ public class StreamingPager<T>(
                     current + (range to LoadState.Error(t, range.first))
                 }
             } finally {
-                mutex.withLock {
-                    // Remove only if this exact range is still registered
-                    activeStreams.remove(range)
-                    // If the range is no longer active, drop its state
-                    rangeLoadStates.update { current: Map<IntRange, LoadState> ->
-                        current.filterNot { it.key == range }
-                    }
-                    logger.d { "openStream: finished range=$range" }
-                }
+                removeStreamByRange(range)
             }
         }
         activeStreams[range] = job
     }
+
+    private suspend fun removeStreamByRange(range: IntRange) =
+        withContext(NonCancellable) {
+            mutex.withLock {
+                // Remove only if this exact range is still registered
+                activeStreams.remove(range)
+                // If the range is no longer active, drop its state
+                rangeLoadStates.update { current: Map<IntRange, LoadState> ->
+                    current.filterNot { it.key == range }
+                }
+                logger.d { "openStream: finished range=$range" }
+            }
+        }
 
     private suspend fun onPortion(values: Map<Int, T>) {
         mutex.withLock {
@@ -331,7 +338,7 @@ public class StreamingPager<T>(
         logger.d { "totalSize changed: ${current.size} -> $newTotal" }
 
         // Update size and prune values outside new range
-        val newRange = 1..newTotal.coerceAtLeast(1)
+        val newRange = 0..<newTotal.coerceAtLeast(1)
         val prunedValues = current.values.filterKeys { it in newRange }
         _data.update {
             PagingMap(
@@ -345,8 +352,10 @@ public class StreamingPager<T>(
         val toClose = activeStreams.keys.filter { r -> r.first > newTotal || r.last > newTotal }
         if (toClose.isNotEmpty()) logger.d { "closing due to total shrink: $toClose" }
         toClose.forEach { r ->
-            activeStreams.remove(r)?.cancel(CancellationException("StreamingPager: total shrank"))
-            rangeLoadStates.update { currentStates: Map<IntRange, LoadState> -> currentStates.filterNot { it.key == r } }
+            withContext(NonCancellable) {
+                activeStreams.remove(r)?.cancel(CancellationException("StreamingPager: total shrank"))
+                rangeLoadStates.update { currentStates: Map<IntRange, LoadState> -> currentStates.filterNot { it.key == r } }
+            }
         }
         if (lastReadKey > newTotal) keyTrigger.value = newTotal
     }

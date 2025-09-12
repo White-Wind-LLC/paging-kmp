@@ -56,7 +56,7 @@ public class PagingMediator<T, Q>(
     }
 
     /**
-     * Loads the requested 1-based range [position, position + size - 1].
+     * Loads the requested range [position, position + size - 1].
      *
      * Steps:
      * 1) Read from local storage, optionally either emit raw local data (see [PagingMediatorConfig.emitOutdatedRecords]),
@@ -70,7 +70,7 @@ public class PagingMediator<T, Q>(
      *   and the full requested range is refetched once to restore consistency.
      *
      * @param query Query/filter to pass to the remote source.
-     * @param position 1-based start position of the requested range.
+     * @param position start position of the requested range.
      * @param size Number of items to load.
      * @return Cold Flow emitting [DataPortion] updates for this range.
      */
@@ -170,7 +170,7 @@ public class PagingMediator<T, Q>(
     /**
      * Fetches a single contiguous range from the remote data source.
      *
-     * @param range Inclusive 1-based range to fetch.
+     * @param range Inclusive range to fetch.
      * @param query Query/filter forwarded to the remote data source.
      * @return [DataPortion] containing the fetched items and a total size hint.
      */
@@ -187,15 +187,15 @@ public class PagingMediator<T, Q>(
  * Abstraction of a local cache/data store that provides positional reads and incremental persistence.
  * Implementations may be backed by SQL databases, key-value stores, in-memory caches, etc.
  *
- * Implementations must preserve stable positional ordering and use absolute 1-based positions as map keys.
+ * Implementations must preserve stable positional ordering and use absolute positions as map keys.
  */
 public interface LocalDataSource<T, Q> {
     /**
-     * Reads a portion starting at [startPosition] (1-based) with [size] items.
+     * Reads a portion starting at [startPosition] with [size] items.
      *
      * Implementations may return sparse results; missing positions must be omitted from the values map.
      *
-     * @param startPosition 1-based start position.
+     * @param startPosition start position.
      * @param size Number of items to read.
      * @return [DataPortion] with present values and a total size hint (0 when unknown).
      */
@@ -215,14 +215,14 @@ public interface LocalDataSource<T, Q> {
 }
 
 /**
- * Abstraction of a remote source capable of fetching ranges by absolute 1-based position for a given query.
+ * Abstraction of a remote source capable of fetching ranges by absolute position for a given query.
  */
 public interface RemoteDataSource<T, Q> {
     /**
-     * Fetches a portion for [query] starting from [startPosition] (1-based) with [size] items.
+     * Fetches a portion for [query] starting from [startPosition] with [size] items.
      *
      * Implementations must:
-     * - Return absolute 1-based positions as map keys.
+     * - Return absolute positions as map keys.
      * - Provide a consistent totalSize for a given query at the time of the request.
      */
     public suspend fun fetch(startPosition: Int, size: Int, query: Q): DataPortion<T>
