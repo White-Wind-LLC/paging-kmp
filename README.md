@@ -18,12 +18,12 @@ support.
 
 ## Installation
 
-Prerequisites: Kotlin `2.2.20`, repository `mavenCentral()`.
+Prerequisites: Kotlin `2.2.10`, repository `mavenCentral()`.
 
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-core:2.2.0")
+    implementation("ua.wwind.paging:paging-core:2.2.1")
 }
 ```
 

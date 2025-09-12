@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.2.0] - 2025-09-13
+## [2.2.1] - 2025-09-13
 
 ### Breaking Changes
 
@@ -17,7 +17,6 @@ All notable changes to this project will be documented in this file.
   explicit mention of indexing base) to match common developer expectations.
 - `StreamingPager` startup and window alignment now operate from position `0` for empty-state initialization.
 - README examples updated for the new positional semantics and simplified wording.
-- Build tooling updates: Kotlin 2.2.20, Gradle 9.0.0.
 
 ### Fixed
 

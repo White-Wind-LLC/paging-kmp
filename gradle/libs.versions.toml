@@ -1,8 +1,8 @@
 [versions]
-version = "2.2.0"
+version = "2.2.1"
 androidx-activityCompose = "1.11.0"
 compose = "1.8.2"
-kotlin = "2.2.20"
+kotlin = "2.2.10"
 dokka = "2.0.0"
 mavenPublish = "0.34.0"
 agp = "8.11.0"
