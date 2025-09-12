@@ -111,7 +111,11 @@ public class StreamingPager<T>(
             readTotal()
                 .distinctUntilChanged()
                 .collect { newTotal ->
+                    val emptyBefore = _data.value.size == 0
                     onTotalChanged(newTotal)
+                    if (emptyBefore && newTotal > 0) {
+                        tryAdjustStreamsForKey(1)
+                    }
                 }
         }
 
