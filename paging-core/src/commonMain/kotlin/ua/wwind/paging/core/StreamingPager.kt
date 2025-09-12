@@ -2,6 +2,7 @@ package ua.wwind.paging.core
 
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
+import co.touchlab.kermit.StaticConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
@@ -92,7 +93,11 @@ public class StreamingPager<T>(
     // Protects activeStreams and data updates
     private val mutex = Mutex()
 
-    private val logger = Logger.withTag("StreamingPager")
+    private val logger = Logger(
+        StaticConfig(
+            minSeverity = runCatching { Severity.valueOf(BuildKonfig.LOG_LEVEL) }
+            .getOrDefault(Severity.Debug)
+    )).withTag("StreamingPager")
 
     init {
         require(config.loadSize > 0) { "loadSize must be > 0" }
@@ -100,11 +105,6 @@ public class StreamingPager<T>(
         require(config.cacheSize >= 0) { "cacheSize must be >= 0" }
         require(config.closeThreshold >= 0) { "closeThreshold must be >= 0" }
         require(config.keyDebounceMs >= 0) { "keyDebounceMs must be >= 0" }
-
-        val logLevel = runCatching { Severity.valueOf(BuildKonfig.LOG_LEVEL) }
-            .getOrDefault(Severity.Debug)
-        Logger.i { "Logger paging-kmp initialized with level: $logLevel" }
-        Logger.setMinSeverity(logLevel)
 
         // Global collector for total size updates
         scope.launch {
