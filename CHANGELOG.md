@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.2] - 2025-11-05
+
+### Breaking Changes
+
+- Pager/PagingMediator lifecycle: both are now lifecycle-aware using `channelFlow`; the explicit `CoroutineScope`
+  constructor parameter was removed:
+  - `Pager<T>(loadSize, preloadSize, cacheSize, readData)` (removed `scope`)
+  - `PagingMediator<T, Q>(local, remote, config)` (removed `scope`)
+    All internal jobs are bound to the collection lifecycle of the returned `Flow`.
+- StreamingPager package and constructor:
+  - Moved to `ua.wwind.paging.core.stream.StreamingPager` (was `ua.wwind.paging.core.StreamingPager`).
+  - Removed `CoroutineScope` constructor parameter; the pager is now lifecycle-aware via `channelFlow`.
+    Update imports and remove `scope = ...` when instantiating.
+
+### Changed
+
+- StreamingPager internals extracted into `StreamingPagerState` and `WindowHelpers` for clarity and testability.
+- Jobs across `Pager`, `PagingMediator`, and `StreamingPager` are bound to the active flow collection and are
+  cancelled automatically on collector cancellation.
+- Bump Kotlin to 2.2.21.
+
+### Migration Guide
+
+- Update imports: `StreamingPager` is now at `ua.wwind.paging.core.stream.StreamingPager`.
+- Remove `scope` argument from `Pager`, `PagingMediator`, and `StreamingPager` constructors.
+- No API changes to data models (`PagingData`, `PagingMap`, `LoadState`) or mediator/local/remote interfaces.
+
 ## [2.2.1] - 2025-09-13
 
 ### Breaking Changes

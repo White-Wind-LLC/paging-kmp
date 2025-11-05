@@ -18,12 +18,12 @@ support.
 
 ## Installation
 
-Prerequisites: Kotlin `2.2.10`, repository `mavenCentral()`.
+Prerequisites: Kotlin `2.2.21`, repository `mavenCentral()`.
 
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-core:2.2.1")
+  implementation("ua.wwind.paging:paging-core:2.2.2")
 }
 ```
 
@@ -36,7 +36,6 @@ val pager = Pager<User>(
     loadSize = 20,
     preloadSize = 60,
     cacheSize = 100,
-    scope = coroutineScope,
     readData = { position, loadSize ->
         kotlinx.coroutines.flow.flow {
             val users = repository.getUsers(position, loadSize)
@@ -173,7 +172,6 @@ Create mediator and collect:
 
 ```kotlin
 val mediator = PagingMediator(
-    scope = coroutineScope,
     local = UserLocalDataSource(dao),
     remote = UserRemoteDataSource(api),
     config = PagingMediatorConfig(
