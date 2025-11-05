@@ -5,7 +5,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -73,9 +72,7 @@ class PagingMediatorTest {
         remote: RemoteDataSource<Item, Unit>,
         config: PagingMediatorConfig<Item>,
     ): Pair<PagingMediator<Item, Unit>, suspend (Long) -> Unit> {
-        val dispatcher = StandardTestDispatcher(testScheduler)
         val mediator = PagingMediator(
-            scope = TestScope(dispatcher),
             local = local,
             remote = remote,
             config = config,

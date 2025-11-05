@@ -1,6 +1,5 @@
 package ua.wwind.paging.sample.presentation.viewmodel
 
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import ua.wwind.paging.core.DataPortion
@@ -22,11 +21,9 @@ class UserListViewModel(
     private val remote: UserRemoteDataSource,
     private val local: LocalDataSource<User, Unit>,
     private val useMediator: Boolean,
-    scope: CoroutineScope,
 ) {
     val pagingFlow: Flow<PagingData<User>> = if (useMediator) {
         val mediator = PagingMediator<User, Unit>(
-            scope = scope,
             local = local,
             remote = UserRemoteDataSourceAdapter(remote)
         )
@@ -36,7 +33,6 @@ class UserListViewModel(
             loadSize = 20,
             preloadSize = 60,
             cacheSize = 100,
-            scope = scope,
             readData = ::loadUsersDirect
         )
         pager.flow

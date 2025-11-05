@@ -40,8 +40,7 @@ fun MainTabsScreen(
                 val vm = UserListViewModel(
                     remote = remote,
                     local = local,
-                    useMediator = false,
-                    scope = scope
+                    useMediator = false
                 )
                 val useMediator = remember { mutableStateOf(false) }
                 UserListScreen(

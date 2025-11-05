@@ -242,6 +242,7 @@ fun userPortionFlow(position: Int, size: Int): Flow<Map<Int, User>> = flow {
 }
 
 // Create StreamingPager
+@OptIn(ExperimentalStreamingPagerApi::class)
 val pager = StreamingPager<User>(
     config = StreamingPagerConfig(
         loadSize = 20,
@@ -250,7 +251,6 @@ val pager = StreamingPager<User>(
         closeThreshold = 20,
         keyDebounceMs = 300
     ),
-    scope = coroutineScope,
     readTotal = { totalCountFlow() },
     readPortion = { position, size -> userPortionFlow(position, size) }
 )

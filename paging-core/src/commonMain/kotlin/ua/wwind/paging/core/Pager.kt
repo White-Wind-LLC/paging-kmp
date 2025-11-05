@@ -2,14 +2,18 @@ package ua.wwind.paging.core
 
 import arrow.core.toNonEmptyListOrNull
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -29,7 +33,6 @@ import kotlin.math.abs
  * @param loadSize Number of items to load in each request (default: 20)
  * @param preloadSize Number of items to preload around current position (default: 60)
  * @param cacheSize Maximum number of items to keep in memory (default: 100)
- * @param scope CoroutineScope for launching load operations
  * @param readData function to load data portions from the data source
  */
 @OptIn(FlowPreview::class)
@@ -37,85 +40,110 @@ public class Pager<T>(
     private val loadSize: Int = 20,
     private val preloadSize: Int = 60,
     private val cacheSize: Int = 100,
-    private val scope: CoroutineScope,
     private val readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>
 ) {
-    // Reactive storage for paged data
-    private val _data: MutableStateFlow<PagingMap<T>> =
-        MutableStateFlow(PagingMap(0, emptyMap(), onGet = ::onGet))
-
-    // Current loading state (Loading, Success, or Error)
-    private val _loadState: MutableStateFlow<LoadState> = MutableStateFlow(LoadState.Loading)
-
-    /**
-     * Public flow that combines data and load state into PagingData
-     * This is the main API for consumers to observe paging state changes
-     */
-    public val flow: Flow<PagingData<T>> = combine(_data, _loadState) { data, loadState ->
-        PagingData(data, loadState, ::onGet)
-    }
-
-    // Mutex to ensure thread-safe access to internal state
-    private val mutex = Mutex()
+    // External refresh trigger (fan-out to active collections)
+    private val refreshRequests: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 64)
 
     private enum class Direction { Increase, Decrease }
 
-    // Debounced trigger for the last accessed key only
-    private val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(0)
+    /**
+     * Public flow that combines data and load state into PagingData, with internal lifecycle-bound jobs.
+     */
+    public val flow: Flow<PagingData<T>> = channelFlow {
+        // Debounced trigger for the last accessed key only
+        val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(0)
 
-    // Track the last position that was requested for optimization
-    private var lastReadKey: Int = -1
+        // Retry and onGet entry access
+        fun onGet(key: Int) {
+            keyTrigger.update { key }
+        }
 
-    // Active loading job and its planned range; used to prevent duplicate loads and support cancellation
-    private var currentLoadJob: Job? = null
-    private var currentLoadingRange: IntRange? = null
+        // Reactive storage for paged data
+        val data: MutableStateFlow<PagingMap<T>> =
+            MutableStateFlow(PagingMap(0, emptyMap(), onGet = ::onGet))
 
-    init {
-        // Set up debounced loading pipeline
-        scope.launch {
+        // Current loading state (Loading, Success, or Error)
+        val loadState: MutableStateFlow<LoadState> = MutableStateFlow(LoadState.Success)
+
+        // Mutex to ensure thread-safe access to internal state
+        val mutex = Mutex()
+
+        // Track the last position that was requested for optimization
+        var lastReadKey: Int = -1
+
+        // Active loading job and its planned range; used to prevent duplicate loads and support cancellation
+        var currentLoadJob: Job? = null
+        var currentLoadingRange: IntRange? = null
+
+        // Combine and emit data
+        val emitter = launch {
+            combine(data, loadState.onStart { emit(LoadState.Success) }) { data, loadState ->
+                PagingData(data, loadState, ::onGet)
+            }.collect { paging -> send(paging) }
+        }
+
+        // Handle refresh requests from outside
+        val refreshJob = launch {
+            refreshRequests.collectLatest {
+                data.update { it.copy(values = emptyMap()) }
+            }
+        }
+
+        // Set up debounced loading pipeline bound to this collection
+        val keysJob = launch {
             keyTrigger
-                .debounce(300) // Wait 300ms for rapid position changes to settle
-                .distinctUntilChanged() // Ignore duplicate keys
+                .debounce(300)
+                .distinctUntilChanged()
                 .collect { key ->
                     if (key < 0) return@collect
                     val direction =
                         if (lastReadKey >= 0 && key < lastReadKey) Direction.Increase else Direction.Decrease
 
-                    // Compute the range that would be loaded for this key based on current state
-                    val plannedRange = computeFetchFullRangeForKey(key)
+                    val plannedRange = computeFetchFullRangeForKey(data.value, key)
 
-                    // If there is an active load and the new key is inside its range – ignore this key
                     val activeJob = currentLoadJob
                     if (activeJob?.isActive == true && currentLoadingRange?.contains(key) == true) {
                         return@collect
                     }
 
-                    // If there is an active load but the key is outside the current loading range – cancel and start new
                     if (activeJob?.isActive == true && (currentLoadingRange?.contains(key) != true)) {
                         activeJob.cancel(CancellationException("Pager: superseded by new key $key"))
                     }
 
-                    // Start a new loading job for the new key
                     currentLoadingRange = plannedRange
                     val job = launch {
-                        loadPortion(key = key, primaryDirection = direction)
+                        loadPortion(
+                            _data = data,
+                            _loadState = loadState,
+                            mutex = mutex,
+                            key = key,
+                            primaryDirection = direction,
+                            onGet = ::onGet
+                        )
                     }
                     currentLoadJob = job
                     job.invokeOnCompletion {
-                        // Clear references only if this is still the current job
                         if (currentLoadJob === job) {
                             currentLoadJob = null
                             currentLoadingRange = null
                         }
                     }
+
+                    lastReadKey = key
                 }
+        }
+
+        awaitClose {
+            emitter.cancel()
+            refreshJob.cancel()
+            keysJob.cancel()
+            currentLoadJob?.cancel()
         }
     }
 
     public fun refresh() {
-        _data.update {
-            it.copy(values = emptyMap())
-        }
+        refreshRequests.tryEmit(Unit)
     }
 
     /**
@@ -128,7 +156,14 @@ public class Pager<T>(
      * 4. Update cache, removing items outside cache range
      * 5. Handle errors gracefully with retry capability
      */
-    private suspend fun loadPortion(key: Int, primaryDirection: Direction) = mutex.withLock {
+    private suspend fun loadPortion(
+        _data: MutableStateFlow<PagingMap<T>>,
+        _loadState: MutableStateFlow<LoadState>,
+        mutex: Mutex,
+        key: Int,
+        primaryDirection: Direction,
+        onGet: (Int) -> Unit
+    ) = mutex.withLock {
         try {
             val pagingData = _data.value
 
@@ -152,9 +187,7 @@ public class Pager<T>(
                 // Initial load case: load from beginning
                     0..<loadSize
 
-            // Update the currently loading range to reflect the actual computation at runtime
-            currentLoadingRange = fetchFullRange
-
+            // The planned range is tracked at scheduling time; no need to update here
             // Determine the primary range to load first (centered around the requested position)
             val startFetchRange =
                 ((coercedKey - loadSize / 2)..<(coercedKey - loadSize / 2 + loadSize))
@@ -230,7 +263,7 @@ public class Pager<T>(
                                     PagingMap(
                                         size = portion.totalSize,
                                         values = portion.values,
-                                        onGet = ::onGet
+                                        onGet = onGet
                                     )
                                 } else {
                                     val updatedValues: Map<Int, T> = (dataMap + portion.values)
@@ -239,7 +272,7 @@ public class Pager<T>(
                                     PagingMap(
                                         size = portion.totalSize,
                                         values = updatedValues,
-                                        onGet = ::onGet
+                                        onGet = onGet
                                     )
                                 }
                             }
@@ -249,7 +282,6 @@ public class Pager<T>(
                     _loadState.value = LoadState.Success // Signal loading completed
                 }
 
-            lastReadKey = key
         } catch (e: CancellationException) {
             // Preserve cancellation for proper coroutine cleanup
             throw e
@@ -288,19 +320,7 @@ public class Pager<T>(
         return startKey..endKey
     }
 
-    /**
-     * Called when UI accesses a specific position
-     * Triggers debounced loading for that position
-     *
-     * @param key The position being accessed
-     */
-    private fun onGet(key: Int) {
-        // Only the last key matters; debounce will stabilize and compute direction
-        keyTrigger.update { key }
-    }
-
-    private fun computeFetchFullRangeForKey(key: Int): IntRange {
-        val pagingData = _data.value
+    private fun computeFetchFullRangeForKey(pagingData: PagingMap<T>, key: Int): IntRange {
         val fullRange = 0..<pagingData.size.coerceAtLeast(1)
         val coercedKey = key.coerceIn(fullRange)
 

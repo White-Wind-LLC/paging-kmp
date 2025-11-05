@@ -5,7 +5,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -24,8 +23,6 @@ class PagerTest {
         cacheSize: Int = 100,
         failingChunkStartOnce: Int? = null,
     ): Pair<Pager<Int>, suspend (Int) -> Unit> {
-        val dispatched = StandardTestDispatcher(scope.testScheduler)
-
         // state to simulate one-time failure for a particular chunk start
         var hasFailed = false
 
@@ -33,7 +30,6 @@ class PagerTest {
             loadSize = loadSize,
             preloadSize = preloadSize,
             cacheSize = cacheSize,
-            scope = TestScope(dispatched),
             readData = { pos, size ->
                 flow {
                     if (failingChunkStartOnce != null && pos == failingChunkStartOnce && !hasFailed) {

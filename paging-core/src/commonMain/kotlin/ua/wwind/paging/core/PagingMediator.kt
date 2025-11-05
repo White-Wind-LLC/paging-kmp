@@ -1,6 +1,5 @@
 package ua.wwind.paging.core
 
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -22,13 +21,11 @@ import kotlinx.coroutines.sync.withPermit
  *
  * @param T item type
  * @param Q query/filter type (use Unit if not needed)
- * @property scope Coroutine scope used to run paging tasks.
  * @property local Local paging data source.
  * @property remote Remote paging data source.
  * @property config Mediator behavior configuration.
  */
 public class PagingMediator<T, Q>(
-    private val scope: CoroutineScope,
     private val local: LocalDataSource<T, Q>,
     private val remote: RemoteDataSource<T, Q>,
     private val config: PagingMediatorConfig<T> = PagingMediatorConfig(),
@@ -49,7 +46,6 @@ public class PagingMediator<T, Q>(
             loadSize = config.loadSize,
             preloadSize = config.prefetchSize,
             cacheSize = config.cacheSize,
-            scope = scope,
             readData = { position, size -> loadPortion(query, position, size) }
         )
         return pager.flow
