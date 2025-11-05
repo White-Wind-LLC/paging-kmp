@@ -29,6 +29,18 @@ import ua.wwind.paging.core.PagingMap
 import kotlin.math.abs
 import kotlin.math.floor
 
+/**
+ * Configuration for `StreamingPager`.
+ *
+ * Defines chunk sizing, preloading and cache behavior, stream-closing policy, and
+ * key-access debounce used when adjusting active portion streams.
+ *
+ * @property loadSize Number of items per portion (chunk) request.
+ * @property preloadSize Items to keep preloaded in both directions from the last accessed key.
+ * @property cacheSize Cache radius in indices around the last accessed key; values outside are pruned.
+ * @property closeThreshold Distance beyond the active window after which a portion flow is closed.
+ * @property keyDebounceMs Debounce delay for key-access events before adjusting streams.
+ */
 public data class StreamingPagerConfig(
     val loadSize: Int = 20,
     val preloadSize: Int = 60,
@@ -38,22 +50,22 @@ public data class StreamingPagerConfig(
 )
 
 /**
- * Streaming pager that manages multiple concurrent range flows with a dedicated total-size stream.
+ * Streaming pager that manages multiple concurrent, chunk-aligned portion flows together with a
+ * dedicated total-size stream, exposing a single `Flow<PagingData<T>>` for UI consumption.
  *
  * Behavior:
- * - A continuous `readTotal()` stream emits global item count updates and drives `PagingMap.size`.
- * - Portion streams `readPortion(start, size)` emit only data maps (no totals) which are merged into a bounded cache window.
- * - The active window is computed around the last accessed key; chunk-aligned flows of size [loadSize] are opened/kept as needed.
- * - Flows are closed only when the active window moves farther than [closeThreshold] from a flow's bounds.
- * - When the total size shrinks, out-of-bounds flows are cancelled and in-memory data is pruned to the valid range.
- * - Exposes a single `Flow<PagingData<T>>` with a global `LoadState` aggregated from per-range states (priority: Loading > Error > Success).
+ * - `readTotal()` is a continuous flow of the total item count; it drives `PagingMap.size` and pruning.
+ * - `readPortion(start, size)` emits maps of index-to-item for the requested range; no totals are emitted.
+ * - The pager opens and keeps portion flows for chunks of size `config.loadSize` inside an active window
+ *   centered around the last accessed key, preloading up to `config.preloadSize` in both directions.
+ * - Flows are closed when they move farther than `config.closeThreshold` beyond the active window.
+ * - When the total size shrinks, out-of-bounds flows are cancelled and cached items are pruned.
+ * - Load state is aggregated from per-range states with priority: Loading > Error > Success.
  *
- * @param loadSize Maximum number of items per opened portion flow.
- * @param preloadSize Number of items to preload in both directions from the last accessed key.
- * @param cacheSize Maximum number of in-memory items around the last accessed key (cache window).
- * @param closeThreshold Distance beyond the active window after which a flow is closed (default = [loadSize]).
- * @param readTotal Continuous flow of total item count.
- * @param readPortion Flow for a particular portion; returns only the values map (no total).
+ * @property config Paging behavior configuration (see `StreamingPagerConfig`).
+ * @property readTotal Provider of a continuous flow with the current total item count.
+ * @property readPortion Provider of a flow for a portion starting at `pos` of length `loadSize`,
+ * returning only the map of values keyed by absolute index.
  */
 @ExperimentalStreamingPagerApi
 @OptIn(FlowPreview::class)
