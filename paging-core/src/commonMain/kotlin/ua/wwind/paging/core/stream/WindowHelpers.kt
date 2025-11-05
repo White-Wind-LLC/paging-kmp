@@ -27,3 +27,20 @@ internal fun computeWindowAroundCenter(centerChunk: IntRange, totalSize: Int, co
     val end = (centerChunk.last + config.preloadSize).coerceAtMost(full.last)
     return start..end
 }
+
+internal fun alignedChunkStartForKey(key: Int, baseStart: Int, config: StreamingPagerConfig): Int {
+    val diff = key - baseStart
+    val steps = kotlin.math.floor(diff.toDouble() / config.loadSize).toInt()
+    return baseStart + steps * config.loadSize
+}
+
+internal fun alignedChunkContaining(
+    key: Int,
+    baseStart: Int,
+    totalSize: Int,
+    config: StreamingPagerConfig,
+): IntRange {
+    val start = alignedChunkStartForKey(key, baseStart, config).coerceAtLeast(0)
+    val end = (start + config.loadSize).coerceAtMost(totalSize.coerceAtLeast(1))
+    return start..<end
+}
