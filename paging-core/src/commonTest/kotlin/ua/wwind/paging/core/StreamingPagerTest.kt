@@ -6,9 +6,10 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import ua.wwind.paging.core.stream.StreamingPager
+import ua.wwind.paging.core.stream.StreamingPagerConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -44,11 +45,8 @@ class StreamingPagerTest {
         ),
         source: TestSource<Int>,
     ): Pair<StreamingPager<Int>, suspend (Int) -> Unit> {
-        val dispatched = StandardTestDispatcher(scope.testScheduler)
-
         val pager: StreamingPager<Int> = StreamingPager(
             config = config,
-            scope = TestScope(dispatched),
             readTotal = { source.readTotal() },
             readPortion = { s, sz -> source.readPortion(s, sz) }
         )
@@ -88,6 +86,7 @@ class StreamingPagerTest {
         val src = TestSource<Int>()
         src.totalFlow.value = 50
         val (pager, advanceFully) = buildPager(
+            this,
             config = StreamingPagerConfig(
                 loadSize = 5,
                 preloadSize = 5,
@@ -95,7 +94,6 @@ class StreamingPagerTest {
                 closeThreshold = 5,
                 keyDebounceMs = 300
             ),
-            scope = this,
             source = src,
         )
 
@@ -126,6 +124,7 @@ class StreamingPagerTest {
         val src = TestSource<Int>()
         src.totalFlow.value = 20
         val (pager, advanceFully) = buildPager(
+            this,
             config = StreamingPagerConfig(
                 loadSize = 5,
                 preloadSize = 5,
@@ -133,7 +132,6 @@ class StreamingPagerTest {
                 closeThreshold = 5,
                 keyDebounceMs = 0
             ),
-            scope = this,
             source = src,
         )
 
@@ -166,6 +164,7 @@ class StreamingPagerTest {
         val src = TestSource<Int>()
         src.totalFlow.value = 50
         val (pager, advanceFully) = buildPager(
+            this,
             config = StreamingPagerConfig(
                 loadSize = 5,
                 preloadSize = 5,
@@ -173,7 +172,6 @@ class StreamingPagerTest {
                 closeThreshold = 5,
                 keyDebounceMs = 300
             ),
-            scope = this,
             source = src,
         )
 

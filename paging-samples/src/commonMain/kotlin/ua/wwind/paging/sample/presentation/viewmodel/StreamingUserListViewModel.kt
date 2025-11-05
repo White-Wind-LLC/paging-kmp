@@ -1,18 +1,16 @@
 package ua.wwind.paging.sample.presentation.viewmodel
 
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import ua.wwind.paging.core.ExperimentalStreamingPagerApi
 import ua.wwind.paging.core.PagingData
-import ua.wwind.paging.core.StreamingPager
-import ua.wwind.paging.core.StreamingPagerConfig
+import ua.wwind.paging.core.stream.StreamingPager
+import ua.wwind.paging.core.stream.StreamingPagerConfig
 import ua.wwind.paging.sample.data.local.SharedEditableUsersStore
 import ua.wwind.paging.sample.domain.model.User
 
 @OptIn(ExperimentalStreamingPagerApi::class)
 class StreamingUserListViewModel(
     private val store: SharedEditableUsersStore,
-    scope: CoroutineScope,
     loadSize: Int = 20,
     preloadSize: Int = 60,
     cacheSize: Int = 100,
@@ -23,7 +21,6 @@ class StreamingUserListViewModel(
             preloadSize = preloadSize,
             cacheSize = cacheSize,
         ),
-        scope = scope,
         readTotal = { store.totalFlow() },
         readPortion = { start, size -> store.portionMapFlow(start, size) }
     )

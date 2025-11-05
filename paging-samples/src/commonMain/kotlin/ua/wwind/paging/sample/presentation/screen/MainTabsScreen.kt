@@ -61,7 +61,7 @@ fun MainTabsScreen(
 
             else -> {
                 val store = SharedEditableUsersStore(initialSize = 500)
-                val vm = StreamingUserListViewModel(store = store, scope = scope)
+                val vm = StreamingUserListViewModel(store = store)
                 StreamingUserListScreen(viewModel = vm, modifier = modifier)
             }
         }
