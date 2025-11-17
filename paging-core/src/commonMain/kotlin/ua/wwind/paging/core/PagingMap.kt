@@ -1,5 +1,12 @@
 package ua.wwind.paging.core
 
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.PersistentMap
+import kotlinx.collections.immutable.persistentHashMapOf
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.collections.immutable.toPersistentMap
+
 /**
  * Smart data map that provides lazy loading access to paged data.
  *
@@ -22,7 +29,7 @@ package ua.wwind.paging.core
  */
 public data class PagingMap<V>(
     val size: Int,
-    val values: Map<Int, V>,
+    val values: PersistentMap<Int, V>,
     private val onGet: (key: Int) -> Unit
 ) {
 
@@ -32,7 +39,7 @@ public data class PagingMap<V>(
          * Used as initial state or for testing
          */
         public fun <V> empty(): PagingMap<V> {
-            return PagingMap(0, emptyMap()) {}
+            return PagingMap(0, persistentMapOf()) {}
         }
     }
     /**
@@ -46,7 +53,7 @@ public data class PagingMap<V>(
      * @return New PagingMap with transformed values
      */
     public fun <R> mapValues(transform: (V) -> R): PagingMap<R> {
-        return PagingMap(size = size, values = values.mapValues { (_, value) -> transform(value) }, onGet = onGet)
+        return PagingMap(size = size, values = values.mapValues { (_, value) -> transform(value) }.toPersistentMap(), onGet = onGet)
     }
 
     /**

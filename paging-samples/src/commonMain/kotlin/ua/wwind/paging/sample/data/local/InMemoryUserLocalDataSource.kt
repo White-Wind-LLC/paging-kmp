@@ -1,5 +1,6 @@
 package ua.wwind.paging.sample.data.local
 
+import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import ua.wwind.paging.core.DataPortion
@@ -24,6 +25,7 @@ class InMemoryUserLocalDataSource : LocalDataSource<User, Unit> {
             .asSequence()
             .mapNotNull { pos -> snapshot[pos]?.let { pos to it } }
             .toMap()
+            .toPersistentMap()
         return DataPortion(totalSize = totalSizeFlow.value, values = values)
     }
 

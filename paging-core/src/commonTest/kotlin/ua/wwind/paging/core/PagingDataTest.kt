@@ -1,5 +1,6 @@
 package ua.wwind.paging.core
 
+import kotlinx.collections.immutable.persistentMapOf
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -34,7 +35,7 @@ class PagingDataTest {
         }
 
         // dataset size is larger than currently loaded sparse values
-        val sourceMap = PagingMap(size = 100, values = mapOf(2 to 20, 5 to 50), onGet = onGet)
+        val sourceMap = PagingMap(size = 100, values = persistentMapOf(2 to 20, 5 to 50), onGet = onGet)
 
         var lastRetriedKey: Int? = null
         val retryFn: (Int) -> Unit = { key -> lastRetriedKey = key }

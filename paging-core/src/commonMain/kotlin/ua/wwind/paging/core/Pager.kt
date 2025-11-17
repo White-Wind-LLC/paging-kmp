@@ -1,6 +1,8 @@
 package ua.wwind.paging.core
 
 import arrow.core.toNonEmptyListOrNull
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -61,7 +63,7 @@ public class Pager<T>(
 
         // Reactive storage for paged data
         val data: MutableStateFlow<PagingMap<T>> =
-            MutableStateFlow(PagingMap(0, emptyMap(), onGet = ::onGet))
+            MutableStateFlow(PagingMap(0, persistentMapOf(), onGet = ::onGet))
 
         // Current loading state (Loading, Success, or Error)
         val loadState: MutableStateFlow<LoadState> = MutableStateFlow(LoadState.Success)
@@ -86,7 +88,7 @@ public class Pager<T>(
         // Handle refresh requests from outside
         val refreshJob = launch {
             refreshRequests.collectLatest {
-                data.update { it.copy(values = emptyMap()) }
+                data.update { it.copy(values = persistentMapOf()) }
             }
         }
 
@@ -271,7 +273,7 @@ public class Pager<T>(
                                     dataMap = updatedValues
                                     PagingMap(
                                         size = portion.totalSize,
-                                        values = updatedValues,
+                                        values = updatedValues.toPersistentMap(),
                                         onGet = onGet
                                     )
                                 }

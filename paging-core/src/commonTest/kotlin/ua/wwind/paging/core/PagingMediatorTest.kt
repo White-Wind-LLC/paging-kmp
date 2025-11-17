@@ -1,5 +1,6 @@
 package ua.wwind.paging.core
 
+import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -34,7 +35,7 @@ class PagingMediatorTest {
 
         override suspend fun read(startPosition: Int, size: Int, query: Q): DataPortion<T> {
             val last = (startPosition + size - 1)
-            val slice = storage.filterKeys { it in startPosition..last }
+            val slice = storage.filterKeys { it in startPosition..last }.toPersistentMap()
             return DataPortion(totalSize = totalSize, values = slice)
         }
 
@@ -103,14 +104,14 @@ class PagingMediatorTest {
             delay(1_000)
             val last = (start + size - 1).coerceAtMost(10)
             val values = (start..last).associateWith { pos -> Item(pos, stale = false) }
-            DataPortion(totalSize = 10, values = values)
+            DataPortion(totalSize = 10, values = values.toPersistentMap())
         }
         // Separate remote2 for second mediator to avoid call tracking interference
         val remote2 = FakeRemote<Item, Unit> { start, size, _ ->
             delay(1_000)
             val last = (start + size - 1).coerceAtMost(10)
             val values = (start..last).associateWith { pos -> Item(pos, stale = false) }
-            DataPortion(totalSize = 10, values = values)
+            DataPortion(totalSize = 10, values = values.toPersistentMap())
         }
 
         // Build mediator with small window to keep things simple
@@ -187,7 +188,7 @@ class PagingMediatorTest {
         val remote = FakeRemote<Item, Unit> { start, size, _ ->
             val last = start + size - 1
             val values = (start..last).associateWith { pos -> Item(pos) }
-            DataPortion(totalSize = 10, values = values)
+            DataPortion(totalSize = 10, values = values.toPersistentMap())
         }
 
         // Make load and preload equal to request a single chunk around the key
@@ -241,7 +242,7 @@ class PagingMediatorTest {
             val last = start + size - 1
             val values = (start..last).associateWith { pos -> Item(pos) }
             // Always 12 to keep consistent after clear; first compare vs local 10 triggers clear
-            DataPortion(totalSize = 12, values = values)
+            DataPortion(totalSize = 12, values = values.toPersistentMap())
         }
 
         val config = PagingMediatorConfig<Item>(

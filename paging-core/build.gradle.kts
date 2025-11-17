@@ -32,6 +32,7 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.arrow.core)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.collections.immutable)
             implementation(libs.kermit)
         }
         commonTest.dependencies {

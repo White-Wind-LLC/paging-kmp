@@ -1,5 +1,6 @@
 package ua.wwind.paging.sample.presentation.viewmodel
 
+import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import ua.wwind.paging.core.DataPortion
@@ -49,7 +50,9 @@ class UserListViewModel(
         val page = remote.getUsers(position, loadSize)
         val userMap = page.users.mapIndexed { index, user ->
             (position + index) to user
-        }.toMap()
+        }
+            .toMap()
+            .toPersistentMap()
         emit(DataPortion(totalSize = page.totalCount, values = userMap))
     }
 }

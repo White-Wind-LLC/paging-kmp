@@ -1,5 +1,6 @@
 package ua.wwind.paging.core
 
+import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
@@ -39,7 +40,7 @@ class PagerTest {
 
                     val last = (pos + size - 1).coerceAtMost(totalSize)
                     val values: Map<Int, Int> = (pos..last).associateWith { it }
-                    emit(DataPortion(totalSize = totalSize, values = values))
+                    emit(DataPortion(totalSize = totalSize, values = values.toPersistentMap()))
                 }
             }
         )

@@ -1,5 +1,6 @@
 package ua.wwind.paging.core
 
+import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -78,7 +79,7 @@ public class PagingMediator<T, Q>(
         val localPortion = local.read(position, size, query)
             .let { portion ->
                 if (config.emitOutdatedRecords) emit(portion)
-                portion.copy(values = portion.values.filter { !config.isRecordStale(it.value) })
+                portion.copy(values = portion.values.filter { !config.isRecordStale(it.value) }.toPersistentMap())
             }
         if (!config.emitOutdatedRecords) emit(localPortion)
 
@@ -155,7 +156,7 @@ public class PagingMediator<T, Q>(
         } else {
             fetchedPortions
                 .reduce { acc, portion ->
-                    acc.copy(values = acc.values + portion.values)
+                    acc.copy(values = acc.values.putAll(portion.values))
                 }.also {
                     if (shouldEmitMergedPortion) emit(it to false)
                     emit(it to true)

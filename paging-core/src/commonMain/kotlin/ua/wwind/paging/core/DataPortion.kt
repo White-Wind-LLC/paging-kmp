@@ -1,5 +1,7 @@
 package ua.wwind.paging.core
 
+import kotlinx.collections.immutable.PersistentMap
+
 /**
  * Container for a portion of data loaded from a data source.
  *
@@ -25,5 +27,5 @@ package ua.wwind.paging.core
  */
 public data class DataPortion<T>(
     val totalSize: Int,
-    val values: Map<Int, T>,
+    val values: PersistentMap<Int, T>,
 )

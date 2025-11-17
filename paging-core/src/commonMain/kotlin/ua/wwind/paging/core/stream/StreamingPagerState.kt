@@ -1,6 +1,8 @@
 package ua.wwind.paging.core.stream
 
 import co.touchlab.kermit.Logger
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -35,7 +37,7 @@ internal class StreamingPagerState<T>(
     }
 
     val data: MutableStateFlow<PagingMap<T>> =
-        MutableStateFlow(PagingMap(0, emptyMap(), onGet = ::onGet))
+        MutableStateFlow(PagingMap(0, persistentMapOf(), onGet = ::onGet))
 
     val rangeLoadStates: MutableStateFlow<Map<IntRange, LoadState>> = MutableStateFlow(emptyMap())
 
@@ -63,7 +65,7 @@ internal class StreamingPagerState<T>(
             data.update { current ->
                 PagingMap(
                     size = current.size,
-                    values = (current.values + values).filterKeys { it in cacheRange },
+                    values = (current.values + values).filterKeys { it in cacheRange }.toPersistentMap(),
                     onGet = ::onGet
                 )
             }
@@ -117,7 +119,7 @@ internal class StreamingPagerState<T>(
         logger.d { "totalSize changed: ${current.size} -> $newTotal" }
 
         val newRange = 0..<newTotal.coerceAtLeast(1)
-        val prunedValues = current.values.filterKeys { it in newRange }
+        val prunedValues = current.values.filterKeys { it in newRange }.toPersistentMap()
         data.update {
             PagingMap(
                 size = newTotal,

@@ -1,5 +1,6 @@
 package ua.wwind.paging.sample.presentation.viewmodel.adapters
 
+import kotlinx.collections.immutable.toPersistentMap
 import ua.wwind.paging.core.DataPortion
 import ua.wwind.paging.core.RemoteDataSource
 import ua.wwind.paging.sample.domain.model.User
@@ -16,7 +17,9 @@ class UserRemoteDataSourceAdapter(
         val page = remote.getUsers(startPosition, size)
         val values = page.users.mapIndexed { index, user ->
             (startPosition + index) to user
-        }.toMap()
+        }
+            .toMap()
+            .toPersistentMap()
         return DataPortion(totalSize = page.totalCount, values = values)
     }
 }
