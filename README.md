@@ -18,12 +18,14 @@ support.
 
 ## Installation
 
-Prerequisites: Kotlin `2.2.21`, repository `mavenCentral()`.
+Prerequisites: Kotlin `2.2.21`, `org.jetbrains.kotlinx:kotlinx-collections-immutable` `0.4.0` or higher, repository
+`mavenCentral()`.
 
 ```kotlin
 // build.gradle.kts
 dependencies {
-  implementation("ua.wwind.paging:paging-core:2.2.2")
+    implementation("ua.wwind.paging:paging-core:2.2.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.4.0")
 }
 ```
 
@@ -37,7 +39,7 @@ val pager = Pager<User>(
     preloadSize = 60,
     cacheSize = 100,
     readData = { position, loadSize ->
-        kotlinx.coroutines.flow.flow {
+        flow {
             val users = repository.getUsers(position, loadSize)
             emit(
                 DataPortion(
@@ -45,6 +47,7 @@ val pager = Pager<User>(
                     values = users.mapIndexed { index, user ->
                         (position + index) to user
                     }.toMap()
+                        .toPersistentMap()
                 )
             )
             // Optionally emit more portions progressively if your source supports it

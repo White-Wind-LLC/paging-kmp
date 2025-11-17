@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.3] - 2025-11-18
+
+### Changed
+
+- Migrate to immutable collections: `PagingMap`, `DataPortion`, and all paging data structures now use
+  `kotlinx.collections.immutable.PersistentMap` instead of standard `Map` for better efficiency with Jetpack Compose
+  and reactive UI frameworks.
+- Added `kotlinx-collections-immutable` dependency to `paging-core` and `paging-samples`.
+
+### Migration Guide
+
+- The public API surface remains compatible; `PersistentMap` implements `Map` interface, so existing read operations
+  continue to work.
+
 ## [2.2.2] - 2025-11-05
 
 ### Breaking Changes
