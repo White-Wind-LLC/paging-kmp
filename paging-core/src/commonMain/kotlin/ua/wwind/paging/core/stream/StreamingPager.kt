@@ -3,13 +3,16 @@ package ua.wwind.paging.core.stream
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
 import co.touchlab.kermit.StaticConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import ua.wwind.paging.core.BuildKonfig
 import ua.wwind.paging.core.ExperimentalStreamingPagerApi
@@ -85,24 +88,42 @@ public class StreamingPager<T>(
             logger = logger,
         )
 
+        val retryRequests: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 1)
+
         val emitter = launch {
             combine(state.data, state.loadStateFlow) { data: PagingMap<T>, loadState ->
-                PagingData(data, loadState, state::onGet)
+                PagingData(data, loadState) { key ->
+                    state.onGet(key)
+                    retryRequests.tryEmit(Unit)
+                }
             }.collect { paging ->
                 send(paging)
             }
         }
 
         val totalJob = launch {
-            readTotal()
-                .distinctUntilChanged()
-                .collect { newTotal ->
-                    val emptyBefore = state.data.value.size == 0
-                    state.onTotalChanged(newTotal)
-                    if (emptyBefore && newTotal > 0) {
-                        state.tryAdjustStreamsForKey(0, this)
-                    }
+            while (true) {
+                try {
+                    readTotal()
+                        .distinctUntilChanged()
+                        .collect { newTotal ->
+                            val emptyBefore = state.data.value.size == 0
+                            state.onTotalChanged(newTotal)
+                            if (emptyBefore && newTotal > 0) {
+                                state.tryAdjustStreamsForKey(0, this)
+                            }
+                        }
+                    retryRequests.first()
+                    state.onTotalRetryStart()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    logger.e(t) { "readTotal: error" }
+                    state.onTotalError(t)
+                    retryRequests.first()
+                    state.onTotalRetryStart()
                 }
+            }
         }
 
         val keysJob = launch {

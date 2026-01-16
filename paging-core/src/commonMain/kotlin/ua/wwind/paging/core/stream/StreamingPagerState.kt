@@ -141,6 +141,36 @@ internal class StreamingPagerState<T>(
         if (lastReadKey > newTotal) keyTrigger.value = newTotal
     }
 
+    /**
+     * Marks all known ranges as failed due to a `readTotal()` error.
+     *
+     * Keeps the flow alive while propagating a global error state to the UI.
+     */
+    suspend fun onTotalError(throwable: Throwable) = mutex.withLock {
+        val ranges = (rangeLoadStates.value.keys + activeStreams.keys).toSet()
+        val errorRanges = ranges.ifEmpty {
+            setOf(0..<config.loadSize)
+        }
+        rangeLoadStates.update { current: Map<IntRange, LoadState> ->
+            current + errorRanges.associateWith { range -> LoadState.Error(throwable, range.first) }
+        }
+    }
+
+    /**
+     * Resets all known ranges to loading state when retrying `readTotal()`.
+     *
+     * Used to reflect that a global retry is in progress after a total error.
+     */
+    suspend fun onTotalRetryStart() = mutex.withLock {
+        val ranges = (rangeLoadStates.value.keys + activeStreams.keys).toSet()
+        val retryRanges = ranges.ifEmpty {
+            setOf(0..<config.loadSize)
+        }
+        rangeLoadStates.update { current: Map<IntRange, LoadState> ->
+            current + retryRanges.associateWith { LoadState.Loading }
+        }
+    }
+
     suspend fun tryAdjustStreamsForKey(key: Int, scope: CoroutineScope) = mutex.withLock {
         logger.d { "tryAdjustStreamsForKey: key=$key" }
         cleanupInactiveStreamsLocked()

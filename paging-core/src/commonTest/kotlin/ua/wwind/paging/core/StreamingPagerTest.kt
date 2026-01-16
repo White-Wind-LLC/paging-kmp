@@ -4,7 +4,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -198,6 +200,55 @@ class StreamingPagerTest {
         src.emitPortion(25, 5, (25..29).associateWith { it })
         advanceFully(10)
         assertEquals(LoadState.Success, latest!!.loadState)
+
+        job.cancel()
+    }
+
+    @Test
+    fun readTotal_error_then_retry_restarts_collection() = runTest {
+        val totalFlow = MutableSharedFlow<Int>(replay = 1)
+        var totalCalls = 0
+        val portionFlows: MutableMap<Pair<Int, Int>, MutableSharedFlow<Map<Int, Int>>> = LinkedHashMap()
+
+        val config = StreamingPagerConfig(
+            loadSize = 5,
+            preloadSize = 5,
+            cacheSize = 100,
+            closeThreshold = 5,
+            keyDebounceMs = 1
+        )
+
+        val pager: StreamingPager<Int> = StreamingPager(
+            config = config,
+            readTotal = {
+                flow {
+                    totalCalls++
+                    if (totalCalls == 1) {
+                        throw IllegalStateException("boom")
+                    }
+                    emitAll(totalFlow)
+                }
+            },
+            readPortion = { start, size ->
+                portionFlows.getOrPut(start to size) { MutableSharedFlow(replay = 1) }
+            }
+        )
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+
+        testScheduler.runCurrent()
+        assertIs<LoadState.Error>(latest?.loadState)
+        assertEquals(1, totalCalls)
+
+        latest!!.retry(0)
+        testScheduler.runCurrent()
+        assertEquals(2, totalCalls)
+        assertEquals(LoadState.Loading, latest.loadState)
+
+        totalFlow.emit(10)
+        testScheduler.runCurrent()
+        assertEquals(10, latest.data.size)
 
         job.cancel()
     }
