@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.4] - 2026-01-16
+
+### Fixed
+
+- StreamingPager: handle `readTotal()` failures by propagating `LoadState.Error` without terminating the flow.
+- StreamingPager: retry now restarts `readTotal()` collection after a total-size failure.
+
+### Changed
+
+- Bumped library versions: `androidx-activity-compose` to 1.12.2, Kotlin to 2.3.0, AGP to 8.12.0, and Arrow to 2.2.1.1.
+
+### Tests
+
+- Added a regression test covering `readTotal()` error followed by retry recovery.
+
 ## [2.2.3] - 2025-11-18
 
 ### Changed
