@@ -1,5 +1,8 @@
 package ua.wwind.paging.core
 
+import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -13,9 +16,6 @@ import kotlinx.coroutines.test.runTest
 import ua.wwind.paging.core.stream.StreamingPager
 import ua.wwind.paging.core.stream.StreamingPagerConfig
 import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertIs
-import kotlin.test.assertNotNull
 
 @OptIn(ExperimentalCoroutinesApi::class, ExperimentalStreamingPagerApi::class)
 class StreamingPagerTest {
@@ -73,12 +73,12 @@ class StreamingPagerTest {
 
         // Initially zero
         advanceFully(0)
-        assertEquals(0, latest?.data?.size ?: 0)
+        (latest?.data?.size ?: 0) shouldBe 0
 
         // Update total
         src.totalFlow.value = 50
         advanceFully(100)
-        assertEquals(50, latest?.data?.size)
+        latest?.data?.size shouldBe 50
 
         job.cancel()
     }
@@ -112,11 +112,9 @@ class StreamingPagerTest {
         src.emitPortion(0, 5, (0..4).associateWith { it })
         advanceFully(10)
 
-        val after = latest
-        assertNotNull(after)
-        val entry = after!!.data[0]
-        assertIs<EntryState.Success<Int>>(entry)
-        assertEquals(0, entry.value)
+        val after = latest.shouldNotBeNull()
+        val entry = after.data[0].shouldBeInstanceOf<EntryState.Success<Int>>()
+        entry.value shouldBe 0
 
         job.cancel()
     }
@@ -154,9 +152,9 @@ class StreamingPagerTest {
         // Now shrink total to 7 -> keys > 6 must be pruned
         src.totalFlow.value = 7
         advanceFully(10)
-        assertEquals(7, latest!!.data.size)
+        latest!!.data.size shouldBe 7
         // lastKey should be <= 6
-        assertEquals(true, latest!!.data.lastKey() <= 6)
+        (latest!!.data.lastKey() <= 6) shouldBe true
 
         job.cancel()
     }
@@ -187,7 +185,7 @@ class StreamingPagerTest {
         src.emitPortion(0, 5, (0..4).associateWith { it })
         src.emitPortion(5, 5, (5..9).associateWith { it })
         advanceFully(100)
-        assertEquals(LoadState.Success, latest!!.loadState)
+        latest!!.loadState shouldBe LoadState.Success
 
         // Access far key to open another range near 20
         latest!!.data[20]
@@ -199,7 +197,7 @@ class StreamingPagerTest {
         src.emitPortion(20, 5, (20..24).associateWith { it })
         src.emitPortion(25, 5, (25..29).associateWith { it })
         advanceFully(10)
-        assertEquals(LoadState.Success, latest!!.loadState)
+        latest!!.loadState shouldBe LoadState.Success
 
         job.cancel()
     }
@@ -238,17 +236,17 @@ class StreamingPagerTest {
         val job = launch { pager.flow.collect { latest = it } }
 
         testScheduler.runCurrent()
-        assertIs<LoadState.Error>(latest?.loadState)
-        assertEquals(1, totalCalls)
+        latest?.loadState.shouldBeInstanceOf<LoadState.Error>()
+        totalCalls shouldBe 1
 
         latest!!.retry(0)
         testScheduler.runCurrent()
-        assertEquals(2, totalCalls)
-        assertEquals(LoadState.Loading, latest.loadState)
+        totalCalls shouldBe 2
+        latest.loadState shouldBe LoadState.Loading
 
         totalFlow.emit(10)
         testScheduler.runCurrent()
-        assertEquals(10, latest.data.size)
+        latest.data.size shouldBe 10
 
         job.cancel()
     }

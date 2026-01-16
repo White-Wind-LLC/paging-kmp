@@ -1,5 +1,7 @@
 package ua.wwind.paging.core
 
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -9,9 +11,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertIs
-import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PagerTest {
@@ -73,15 +72,14 @@ class PagerTest {
         advanceFully(0)
 
         val after = latest!!
-        assertIs<LoadState.Success>(after.loadState)
+        after.loadState.shouldBeInstanceOf<LoadState.Success>()
         // The requested key should now be present
-        val entry = after.data[target]
-        assertIs<EntryState.Success<Int>>(entry)
-        assertEquals(target, entry.value)
+        val entry = after.data[target].shouldBeInstanceOf<EntryState.Success<Int>>()
+        entry.value shouldBe target
 
         // Some data around the target should be present within preload window
-        assertTrue(after.data.firstKey() >= 0)
-        assertTrue(after.data.lastKey() >= target)
+        (after.data.firstKey() >= 0) shouldBe true
+        (after.data.lastKey() >= target) shouldBe true
 
         job.cancel()
     }
@@ -100,19 +98,19 @@ class PagerTest {
         latest!!.data[50]
         advanceFully(0)
         val afterFirst = latest!!
-        assertIs<LoadState.Success>(afterFirst.loadState)
+        afterFirst.loadState.shouldBeInstanceOf<LoadState.Success>()
 
         // Then jump far to 400
-        latest!!.data[400]
+        latest.data[400]
         advanceFully(0)
         val afterSecond = latest!!
-        assertIs<LoadState.Success>(afterSecond.loadState)
+        afterSecond.loadState.shouldBeInstanceOf<LoadState.Success>()
 
         // Validate data window roughly within preload range around 400
         val firstKey = afterSecond.data.firstKey()
         val lastKey = afterSecond.data.lastKey()
-        assertTrue(firstKey >= 400 - preloadSize)
-        assertTrue(lastKey < 400 + preloadSize)
+        (firstKey >= 400 - preloadSize) shouldBe true
+        (lastKey < 400 + preloadSize) shouldBe true
 
         job.cancel()
     }
@@ -131,20 +129,18 @@ class PagerTest {
         advanceFully(0)
 
         val afterError = latest!!
-        val errorState = afterError.loadState
-        assertIs<LoadState.Error>(errorState)
-        assertEquals(200, errorState.key)
+        val errorState = afterError.loadState.shouldBeInstanceOf<LoadState.Error>()
+        errorState.key shouldBe 200
 
         // Retry via PagingData.retry; use a nearby key to bypass distinctUntilChanged
         afterError.retry(201)
         advanceFully(0)
 
         val afterRetry = latest!!
-        assertIs<LoadState.Success>(afterRetry.loadState)
+        afterRetry.loadState.shouldBeInstanceOf<LoadState.Success>()
         // Ensure requested item is now present
-        val entry = afterRetry.data[200]
-        assertIs<EntryState.Success<Int>>(entry)
-        assertEquals(200, entry.value)
+        val entry = afterRetry.data[200].shouldBeInstanceOf<EntryState.Success<Int>>()
+        entry.value shouldBe 200
 
         job.cancel()
     }

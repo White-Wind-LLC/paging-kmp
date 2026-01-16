@@ -1,5 +1,7 @@
 package ua.wwind.paging.core
 
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -9,9 +11,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertIs
-import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PagingMediatorTest {
@@ -141,8 +140,8 @@ class PagingMediatorTest {
 
         // At this moment, only local portion was emitted, remote is still delayed
         val afterLocal = latest!!
-        assertIs<LoadState.Loading>(afterLocal.loadState)
-        assertIs<EntryState.Loading>(afterLocal.data[3])
+        afterLocal.loadState.shouldBeInstanceOf<LoadState.Loading>()
+        afterLocal.data[3].shouldBeInstanceOf<EntryState.Loading>()
 
         // Now build another mediator that emits outdated local records first
         val configEmitOutdated = config.copy(emitOutdatedRecords = true)
@@ -163,14 +162,14 @@ class PagingMediatorTest {
         // Complete remote1 and verify final success for first mediator; verify called missing ranges
         advanceFully(1_000)
         val afterRemote = latest!!
-        assertIs<LoadState.Success>(afterRemote.loadState)
+        afterRemote.loadState.shouldBeInstanceOf<LoadState.Success>()
         // All positions in requested range should now be loaded
         (0..4).forEach { pos ->
-            assertIs<EntryState.Success<Item>>(afterRemote.data[pos])
+            afterRemote.data[pos].shouldBeInstanceOf<EntryState.Success<Item>>()
         }
         // Verify remote1 fetched missing ranges: 0..1 and 3..3 (allowing duplicates)
-        assertTrue(remote1.callArgs.contains(0 to 2))
-        assertTrue(remote1.callArgs.contains(3 to 1))
+        remote1.callArgs.contains(0 to 2) shouldBe true
+        remote1.callArgs.contains(3 to 1) shouldBe true
 
         job.cancel()
         job2.cancel()
@@ -217,11 +216,11 @@ class PagingMediatorTest {
 
         // With key=0 and loadSize=5 on empty state, Pager enqueues two ranges (0..3) and (4..8)
         // Verify mediator fetched each whole requested range (no sub-splitting)
-        assertEquals(listOf(0 to 4, 4 to 5), remote.callArgs.distinct())
+        remote.callArgs.distinct() shouldBe listOf(0 to 4, 4 to 5)
 
         val after = latest!!
-        assertIs<LoadState.Success>(after.loadState)
-        (0..4).forEach { pos -> assertIs<EntryState.Success<Item>>(after.data[pos]) }
+        after.loadState.shouldBeInstanceOf<LoadState.Success>()
+        (0..4).forEach { pos -> after.data[pos].shouldBeInstanceOf<EntryState.Success<Item>>() }
 
         job.cancel()
     }
@@ -268,14 +267,14 @@ class PagingMediatorTest {
         this.testScheduler.runCurrent()
 
         // Local should have been cleared exactly once due to total mismatch and then saved
-        assertEquals(1, local.clearCalls)
-        assertTrue(local.saveCalls >= 1)
+        local.clearCalls shouldBe 1
+        (local.saveCalls >= 1) shouldBe true
 
         val after = latest!!
-        assertIs<LoadState.Success>(after.loadState)
+        after.loadState.shouldBeInstanceOf<LoadState.Success>()
         // Size should now reflect remote's size (12)
-        assertEquals(12, after.data.size)
-        (0..4).forEach { pos -> assertIs<EntryState.Success<Item>>(after.data[pos]) }
+        after.data.size shouldBe 12
+        (0..4).forEach { pos -> after.data[pos].shouldBeInstanceOf<EntryState.Success<Item>>() }
 
         job.cancel()
     }

@@ -1,11 +1,10 @@
 package ua.wwind.paging.core
 
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
+import io.kotest.matchers.types.shouldBeSameInstanceAs
 import kotlinx.collections.immutable.persistentMapOf
 import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertIs
-import kotlin.test.assertSame
-import kotlin.test.assertTrue
 
 class PagingDataTest {
 
@@ -13,16 +12,16 @@ class PagingDataTest {
     fun empty_factory_returns_success_and_empty_map_and_noop_retry() {
         val empty: PagingData<Int> = PagingData.empty()
 
-        assertTrue(empty.data.isEmpty())
-        assertIs<LoadState.Success>(empty.loadState)
+        empty.data.isEmpty() shouldBe true
+        empty.loadState.shouldBeInstanceOf<LoadState.Success>()
 
         // no-op retry should not throw
         empty.retry(123)
 
         // mapping empty keeps it empty and preserves success state
         val mapped = empty.map { it.toString() }
-        assertTrue(mapped.data.isEmpty())
-        assertIs<LoadState.Success>(mapped.loadState)
+        mapped.data.isEmpty() shouldBe true
+        mapped.loadState.shouldBeInstanceOf<LoadState.Success>()
     }
 
     @Test
@@ -44,26 +43,24 @@ class PagingDataTest {
         val mapped: PagingData<String> = pagingData.map { value -> "v=$value" }
 
         // size and state preserved
-        assertEquals(100, mapped.data.size)
-        assertIs<LoadState.Success>(mapped.loadState)
+        mapped.data.size shouldBe 100
+        mapped.loadState.shouldBeInstanceOf<LoadState.Success>()
         // retry function reference preserved
-        assertSame(mapped.retry, retryFn)
+        mapped.retry shouldBeSameInstanceAs retryFn
 
         // transformed values for loaded entries
-        val entry2 = mapped.data[2]
-        assertIs<EntryState.Success<String>>(entry2)
-        assertEquals("v=20", entry2.value)
+        val entry2 = mapped.data[2].shouldBeInstanceOf<EntryState.Success<String>>()
+        entry2.value shouldBe "v=20"
 
-        val entry5 = mapped.data[5]
-        assertIs<EntryState.Success<String>>(entry5)
-        assertEquals("v=50", entry5.value)
+        val entry5 = mapped.data[5].shouldBeInstanceOf<EntryState.Success<String>>()
+        entry5.value shouldBe "v=50"
 
         // onGet callback preserved and invoked via access
-        assertEquals(2, getCount)
-        assertEquals(5, lastGetKey)
+        getCount shouldBe 2
+        lastGetKey shouldBe 5
 
         // retry still callable
         mapped.retry(77)
-        assertEquals(77, lastRetriedKey)
+        lastRetriedKey shouldBe 77
     }
 }
