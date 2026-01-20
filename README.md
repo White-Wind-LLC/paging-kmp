@@ -24,7 +24,7 @@ Prerequisites: Kotlin `2.3.0`, `org.jetbrains.kotlinx:kotlinx-collections-immuta
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-core:2.2.4")
+    implementation("ua.wwind.paging:paging-core:2.2.5")
     implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.4.0")
 }
 ```

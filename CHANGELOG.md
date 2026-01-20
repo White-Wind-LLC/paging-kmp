@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.5] - 2026-01-20
+
+### Fixed
+- StreamingPager: set initial load state to `LoadState.Loading` on start for better consistency with UI lifecycle.
+
+### Changed
+- Migrated all tests to Kotest assertions for improved readability and maintenance.
+- Added `kotest-assertions-core` dependency to `paging-core`.
+
 ## [2.2.4] - 2026-01-16
 
 ### Fixed
