@@ -50,7 +50,7 @@ internal class StreamingPagerState<T>(
                 firstError ?: LoadState.Success
             }
         }
-        .onStart { emit(LoadState.Success) }
+        .onStart { emit(LoadState.Loading) }
 
     val activeStreams: MutableMap<IntRange, Job> = LinkedHashMap()
 
