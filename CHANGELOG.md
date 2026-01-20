@@ -2,12 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.6] - 2026-01-21
+
+### Fixed
+
+- StreamingPager: refined initial load state logic to ensure `LoadState.Loading` is correctly emitted before the first
+  data portion or total size is processed.
+- StreamingPagerState: internal state now uses nullable tracking for range load states to explicitly represent the
+  pre-initialization phase.
+
 ## [2.2.5] - 2026-01-20
 
 ### Fixed
+
 - StreamingPager: set initial load state to `LoadState.Loading` on start for better consistency with UI lifecycle.
 
 ### Changed
+
 - Migrated all tests to Kotest assertions for improved readability and maintenance.
 - Added `kotest-assertions-core` dependency to `paging-core`.
 
@@ -46,13 +57,13 @@ All notable changes to this project will be documented in this file.
 
 - Pager/PagingMediator lifecycle: both are now lifecycle-aware using `channelFlow`; the explicit `CoroutineScope`
   constructor parameter was removed:
-  - `Pager<T>(loadSize, preloadSize, cacheSize, readData)` (removed `scope`)
-  - `PagingMediator<T, Q>(local, remote, config)` (removed `scope`)
-    All internal jobs are bound to the collection lifecycle of the returned `Flow`.
+    - `Pager<T>(loadSize, preloadSize, cacheSize, readData)` (removed `scope`)
+    - `PagingMediator<T, Q>(local, remote, config)` (removed `scope`)
+      All internal jobs are bound to the collection lifecycle of the returned `Flow`.
 - StreamingPager package and constructor:
-  - Moved to `ua.wwind.paging.core.stream.StreamingPager` (was `ua.wwind.paging.core.StreamingPager`).
-  - Removed `CoroutineScope` constructor parameter; the pager is now lifecycle-aware via `channelFlow`.
-    Update imports and remove `scope = ...` when instantiating.
+    - Moved to `ua.wwind.paging.core.stream.StreamingPager` (was `ua.wwind.paging.core.StreamingPager`).
+    - Removed `CoroutineScope` constructor parameter; the pager is now lifecycle-aware via `channelFlow`.
+      Update imports and remove `scope = ...` when instantiating.
 
 ### Changed
 
