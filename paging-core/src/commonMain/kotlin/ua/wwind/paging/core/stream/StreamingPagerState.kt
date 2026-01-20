@@ -9,6 +9,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
@@ -39,11 +40,11 @@ internal class StreamingPagerState<T>(
     val data: MutableStateFlow<PagingMap<T>> =
         MutableStateFlow(PagingMap(0, persistentMapOf(), onGet = ::onGet))
 
-    val rangeLoadStates: MutableStateFlow<Map<IntRange, LoadState>> = MutableStateFlow(emptyMap())
+    val rangeLoadStates: MutableStateFlow<Map<IntRange, LoadState>?> = MutableStateFlow(null)
 
     val loadStateFlow: Flow<LoadState> = rangeLoadStates
         .map { stateMap ->
-            if (stateMap.values.contains(LoadState.Loading)) {
+            if (stateMap == null || stateMap.values.contains(LoadState.Loading)) {
                 LoadState.Loading
             } else {
                 val firstError = stateMap.values.firstOrNull { it is LoadState.Error }
@@ -76,8 +77,8 @@ internal class StreamingPagerState<T>(
     suspend fun removeStreamByRange(range: IntRange) = withContext(NonCancellable) {
         mutex.withLock {
             activeStreams.remove(range)
-            rangeLoadStates.update { current: Map<IntRange, LoadState> ->
-                current.filterNot { it.key == range }
+            rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
+                current?.filterNot { it.key == range }
             }
             logger.d { "openStream: finished range=$range" }
         }
@@ -93,8 +94,8 @@ internal class StreamingPagerState<T>(
                 readPortion(range.first, fetchSize).collect { values ->
                     logger.d { "onPortion(range=$range, count=${values.size}, keys=${values.keys.minOrNull()}..${values.keys.maxOrNull()})" }
                     onPortion(values)
-                    rangeLoadStates.update { current: Map<IntRange, LoadState> ->
-                        current + (range to LoadState.Success)
+                    rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
+                        current.orEmpty() + (range to LoadState.Success)
                     }
                 }
             } catch (e: CancellationException) {
@@ -102,8 +103,8 @@ internal class StreamingPagerState<T>(
                 throw e
             } catch (t: Throwable) {
                 logger.e(t) { "openStream: error in range=$range" }
-                rangeLoadStates.update { current: Map<IntRange, LoadState> ->
-                    current + (range to LoadState.Error(t, range.first))
+                rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
+                    current.orEmpty() + (range to LoadState.Error(t, range.first))
                 }
             } finally {
                 removeStreamByRange(range)
@@ -133,8 +134,8 @@ internal class StreamingPagerState<T>(
         toClose.forEach { r ->
             withContext(NonCancellable) {
                 activeStreams.remove(r)?.cancel(CancellationException("StreamingPager: total shrank"))
-                rangeLoadStates.update { currentStates: Map<IntRange, LoadState> ->
-                    currentStates.filterNot { it.key == r }
+                rangeLoadStates.update { currentStates: Map<IntRange, LoadState>? ->
+                    currentStates?.filterNot { it.key == r }
                 }
             }
         }
@@ -147,12 +148,12 @@ internal class StreamingPagerState<T>(
      * Keeps the flow alive while propagating a global error state to the UI.
      */
     suspend fun onTotalError(throwable: Throwable) = mutex.withLock {
-        val ranges = (rangeLoadStates.value.keys + activeStreams.keys).toSet()
+        val ranges = (rangeLoadStates.value.orEmpty().keys + activeStreams.keys).toSet()
         val errorRanges = ranges.ifEmpty {
             setOf(0..<config.loadSize)
         }
-        rangeLoadStates.update { current: Map<IntRange, LoadState> ->
-            current + errorRanges.associateWith { range -> LoadState.Error(throwable, range.first) }
+        rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
+            current.orEmpty() + errorRanges.associateWith { range -> LoadState.Error(throwable, range.first) }
         }
     }
 
@@ -162,12 +163,12 @@ internal class StreamingPagerState<T>(
      * Used to reflect that a global retry is in progress after a total error.
      */
     suspend fun onTotalRetryStart() = mutex.withLock {
-        val ranges = (rangeLoadStates.value.keys + activeStreams.keys).toSet()
+        val ranges = (rangeLoadStates.value.orEmpty().keys + activeStreams.keys).toSet()
         val retryRanges = ranges.ifEmpty {
             setOf(0..<config.loadSize)
         }
-        rangeLoadStates.update { current: Map<IntRange, LoadState> ->
-            current + retryRanges.associateWith { LoadState.Loading }
+        rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
+            current.orEmpty() + retryRanges.associateWith { LoadState.Loading }
         }
     }
 
@@ -197,8 +198,8 @@ internal class StreamingPagerState<T>(
             if (toCloseNow.isNotEmpty()) logger.d { "closing: $toCloseNow (window=$window, threshold>${config.closeThreshold})" }
             toCloseNow.forEach { r ->
                 activeStreams.remove(r)?.cancel(CancellationException("StreamingPager: window shifted"))
-                rangeLoadStates.update { current: Map<IntRange, LoadState> ->
-                    current.filterNot { it.key == r }
+                rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
+                    current?.filterNot { it.key == r }
                 }
             }
 
@@ -226,8 +227,8 @@ internal class StreamingPagerState<T>(
         val toOpen = targetChunks.filter { it !in activeStreams }
         if (toOpen.isNotEmpty()) logger.d { "opening missing ranges: $toOpen" }
         if (toOpen.isNotEmpty()) {
-            rangeLoadStates.update { current: Map<IntRange, LoadState> ->
-                current + toOpen.associateWith { LoadState.Loading }
+            rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
+                current.orEmpty() + toOpen.associateWith { LoadState.Loading }
             }
         }
 
