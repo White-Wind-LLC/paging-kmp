@@ -385,6 +385,6 @@ private fun IntRange.chunkedRanges(size: Int): List<IntRange> {
 private fun IntRange.expandTo(size: Int, limit: Int): IntRange {
     return when {
         last - first + 1 >= size -> return this
-        else -> first..<(first + size).coerceAtMost(limit)
+        else -> first..(first + size - 1).coerceAtMost(limit)
     }
 }

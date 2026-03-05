@@ -144,4 +144,35 @@ class PagerTest {
 
         job.cancel()
     }
+
+    @Test
+    fun initial_key_zero_requests_full_load_size_chunk() = runTest {
+        val callArgs = mutableListOf<Pair<Int, Int>>()
+        val pager = Pager<Int>(
+            loadSize = 5,
+            preloadSize = 5,
+            cacheSize = 20,
+            readData = { pos, size ->
+                flow {
+                    callArgs += pos to size
+                    val last = (pos + size - 1).coerceAtMost(20)
+                    val values: Map<Int, Int> = (pos..last).associateWith { it }
+                    emit(DataPortion(totalSize = 20, values = values.toPersistentMap()))
+                }
+            }
+        )
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+
+        checkNotNull(latest).data[0]
+        this.testScheduler.advanceTimeBy(300)
+        this.testScheduler.advanceUntilIdle()
+
+        callArgs.distinct() shouldBe listOf(0 to 5)
+        latest.data[4].shouldBeInstanceOf<EntryState.Success<Int>>()
+
+        job.cancel()
+    }
 }

@@ -202,7 +202,7 @@ class PagingMediatorTest {
             emitIntermediateResults = true,
         )
 
-        val (mediator, advanceFully) = buildMediator(local, remote, config)
+        val (mediator, _) = buildMediator(local, remote, config)
 
         var latest: PagingData<Item>? = null
         val job: Job = launch { mediator.flow(Unit).collectLatest { latest = it } }
@@ -214,9 +214,8 @@ class PagingMediatorTest {
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.runCurrent()
 
-        // With key=0 and loadSize=5 on empty state, Pager enqueues two ranges (0..3) and (4..8)
-        // Verify mediator fetched each whole requested range (no sub-splitting)
-        remote.callArgs.distinct() shouldBe listOf(0 to 4, 4 to 5)
+        // With key=0 and loadSize=5 on empty state, Pager should fetch one full chunk 0..4.
+        remote.callArgs.distinct() shouldBe listOf(0 to 5)
 
         val after = latest!!
         after.loadState.shouldBeInstanceOf<LoadState.Success>()
@@ -235,9 +234,7 @@ class PagingMediatorTest {
         )
 
         // Remote returns a different total size (12) to trigger inconsistency
-        var callIndex = 0
         val remote = FakeRemote<Item, Unit> { start, size, _ ->
-            callIndex += 1
             val last = start + size - 1
             val values = (start..last).associateWith { pos -> Item(pos) }
             // Always 12 to keep consistent after clear; first compare vs local 10 triggers clear
@@ -255,7 +252,7 @@ class PagingMediatorTest {
             emitIntermediateResults = true,
         )
 
-        val (mediator, advanceFully) = buildMediator(local, remote, config)
+        val (mediator, _) = buildMediator(local, remote, config)
 
         var latest: PagingData<Item>? = null
         val job: Job = launch { mediator.flow(Unit).collectLatest { latest = it } }
@@ -276,6 +273,49 @@ class PagingMediatorTest {
         after.data.size shouldBe 12
         (0..4).forEach { pos -> after.data[pos].shouldBeInstanceOf<EntryState.Success<Item>>() }
 
+        job.cancel()
+    }
+    
+    @Test
+    fun sequential_scroll_over_20_items_with_load_size_5_uses_four_remote_requests() = runTest {
+        val local = FakeLocal<Item, Unit>(
+            initialTotalSize = 0,
+            initialValues = emptyMap(),
+            query = Unit,
+        )
+        val remote = FakeRemote<Item, Unit> { start, size, _ ->
+            val last = (start + size - 1).coerceAtMost(19)
+            val values = (start..last).associateWith { pos -> Item(pos) }
+            DataPortion(totalSize = 20, values = values.toPersistentMap())
+        }
+        val config = PagingMediatorConfig<Item>(
+            loadSize = 5,
+            prefetchSize = 5,
+            cacheSize = 25,
+            isRecordStale = { false },
+            concurrency = 1,
+            fetchFullRangeOnMiss = true,
+            emitOutdatedRecords = false,
+            emitIntermediateResults = true,
+        )
+        val (mediator, _) = buildMediator(local, remote, config)
+        var latest: PagingData<Item>? = null
+        val job: Job = launch { mediator.flow(Unit).collectLatest { latest = it } }
+        this.testScheduler.runCurrent()
+        
+        (0..19).forEach { index ->
+            latest!!.data[index]
+            this.testScheduler.advanceTimeBy(300)
+            this.testScheduler.runCurrent()
+        }
+        this.testScheduler.advanceUntilIdle()
+        
+        remote.callArgs.distinct() shouldBe listOf(0 to 5, 5 to 5, 10 to 5, 15 to 5)
+        
+        val after = latest!!
+        after.loadState.shouldBeInstanceOf<LoadState.Success>()
+        (0..19).forEach { pos -> after.data[pos].shouldBeInstanceOf<EntryState.Success<Item>>() }
+        
         job.cancel()
     }
 }
