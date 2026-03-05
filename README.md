@@ -18,13 +18,13 @@ support.
 
 ## Installation
 
-Prerequisites: Kotlin `2.3.0`, `org.jetbrains.kotlinx:kotlinx-collections-immutable` `0.4.0` or higher, repository
+Prerequisites: Kotlin `2.3.10`, `org.jetbrains.kotlinx:kotlinx-collections-immutable` `0.4.0` or higher, repository
 `mavenCentral()`.
 
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-core:2.2.6")
+    implementation("ua.wwind.paging:paging-core:2.2.7")
     implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.4.0")
 }
 ```

@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.7] - 2026-03-05
+
+### Fixed
+
+- IntRange.expandTo: corrected range expansion logic — when starting from key 0, the pager now correctly requests the
+  full loadSize instead of a smaller range.
+
+### Changed
+
+- Bumped library versions: Kotlin to 2.3.10, AGP to 8.12.3.
+
+### Tests
+
+- Added regression test covering full loadSize request with initial key 0.
+
 ## [2.2.6] - 2026-01-21
 
 ### Fixed
