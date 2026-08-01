@@ -172,13 +172,12 @@ jobs:
         run: chmod +x ./gradlew
 
       # Apple targets only: jvm/js/wasm/linux are already covered by test-linux, and
-      # macosX64/iosX64/iosArm64 cannot execute tests on an arm64 runner, so they are compiled.
+      # iosX64/iosArm64 cannot execute tests on an arm64 runner, so they are compiled.
       - name: Run Apple target checks
         run: |
           ./gradlew -PexcludeSamples=true \
             :paging-core:macosArm64Test \
             :paging-core:iosSimulatorArm64Test \
-            :paging-core:compileTestKotlinMacosX64 \
             :paging-core:compileTestKotlinIosX64 \
             :paging-core:compileTestKotlinIosArm64
 

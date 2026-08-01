@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Dropped the `macosX64` (Intel macOS) target from `paging-core`; the `paging-core-macosx64` artifact is no longer
+  published. Kotlin 2.4 deprecates the target and will remove it in a future release, as Apple winds down x86_64
+  support. `macosArm64` (Apple Silicon) is unaffected, as are `iosX64`, `linuxX64` and `mingwX64`.
+
 ### Changed
 
 - `Pager`, `StreamingPagerConfig` and `PagingMediatorConfig` now reject a cache narrower than the preload window
