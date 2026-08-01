@@ -1,4 +1,5 @@
 import com.diffplug.gradle.spotless.SpotlessExtension
+import com.diffplug.spotless.LineEnding
 import dev.detekt.gradle.extensions.DetektExtension
 
 plugins {
@@ -58,6 +59,11 @@ allprojects {
 // reads (charset, indentation, line length), this block holds the ktlint-only keys.
 apply(plugin = "com.diffplug.spotless")
 extensions.configure<SpotlessExtension> {
+    // Spotless defaults to GIT_ATTRIBUTES, which reads git metadata as an undeclared build
+    // input and invalidates the configuration cache on every single run. LF is what
+    // .editorconfig mandates anyway, so state it directly.
+    lineEndings = LineEnding.UNIX
+
     kotlin {
         target("*/src/**/*.kt")
         targetExclude("**/build/**")
