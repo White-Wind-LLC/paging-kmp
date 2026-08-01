@@ -122,8 +122,8 @@ class PagerTest {
 
     @Test
     fun error_then_retry_succeeds_and_preserves_data() = runTest {
-        // With loadSize 20 and key=200, first chunk is 190..209, so make that fail once
-        val (pager, advanceFully) = buildPager(this, failingChunkStartOnce = 190)
+        // With loadSize 20 and key=200, the first chunk is the grid cell 200..219, so fail that once
+        val (pager, advanceFully) = buildPager(this, failingChunkStartOnce = 200)
 
         var latest: PagingData<Int>? = null
         val job: Job = launch { pager.flow.collectLatest { latest = it } }
@@ -152,7 +152,7 @@ class PagerTest {
 
     @Test
     fun retry_reloads_without_waiting_for_the_key_debounce() = runTest {
-        val (pager, _) = buildPager(this, failingChunkStartOnce = 190)
+        val (pager, _) = buildPager(this, failingChunkStartOnce = 200)
 
         var latest: PagingData<Int>? = null
         val job: Job = launch { pager.flow.collectLatest { latest = it } }
@@ -318,6 +318,48 @@ class PagerTest {
 
         callArgs.distinct() shouldBe listOf(0 to 5)
         latest.data[4].shouldBeInstanceOf<EntryState.Success<Int>>()
+
+        job.cancel()
+    }
+
+    @Test
+    fun fetch_ranges_are_snapped_to_a_load_size_grid() = runTest {
+        val loadSize = 20
+        val calls = mutableListOf<Pair<Int, Int>>()
+        val pager = Pager<Int>(loadSize = loadSize, preloadSize = 60, cacheSize = 100) { pos, size ->
+            flow {
+                calls += pos to size
+                val values: Map<Int, Int> = (pos..<pos + size).associateWith { it }
+                emit(DataPortion(totalSize = 1_000, values = values.toPersistentMap()))
+            }
+        }
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+
+        val visit: (Int) -> Unit = { key ->
+            latest!!.data[key]
+            this.testScheduler.advanceTimeBy(300)
+            this.testScheduler.advanceUntilIdle()
+        }
+
+        // A key in the middle of a grid cell must not shift the grid
+        calls.clear()
+        visit(507)
+        val aroundKey = calls.sortedBy { it.first }
+        calls.clear()
+
+        // Move far enough for the window around 507 to be evicted, then come back
+        visit(900)
+        calls.clear()
+        visit(507)
+
+        // Same positions, same requests: an HTTP or CDN cache can serve the second visit
+        aroundKey.isEmpty() shouldBe false
+        calls.sortedBy { it.first } shouldBe aroundKey
+        aroundKey.all { (pos, size) -> pos % loadSize == 0 && size == loadSize } shouldBe true
+        aroundKey.map { it.first }.distinct() shouldBe aroundKey.map { it.first }
 
         job.cancel()
     }

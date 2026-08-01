@@ -107,7 +107,7 @@ class DiagnosticsFindingsTest {
 
     /**
      * F2 (cont.): a jump to a far position issues every chunk of the preload
-     * window one after another. With a 100 ms backend that is 700 ms of serial
+     * window one after another. With a 100 ms backend that is 600 ms of serial
      * network time to fill a +/-60 item window.
      */
     @Test
@@ -123,19 +123,21 @@ class DiagnosticsFindingsTest {
         latest!!.data[500]
         testScheduler.advanceUntilIdle()
 
-        calls.starts.size shouldBe 7
+        calls.starts.size shouldBe 6
         calls.maxInFlight shouldBe 1
-        // 300 ms debounce + 7 serial round trips
-        (currentTime - t0) shouldBe 1_000L
+        // 300 ms debounce + 6 serial round trips
+        (currentTime - t0) shouldBe 900L
         job.cancel()
     }
 
     /**
-     * F3: chunk boundaries are not aligned to a grid, so the same absolute
-     * positions are requested under different (overlapping) ranges over time.
+     * F3 (fixed): chunk boundaries used to be centred on the accessed key, so overlapping ranges
+     * (`490..509` and `480..499`) fetched the same positions twice in a single pass. Chunks are now
+     * snapped to a `loadSize` grid: the preload window is tiled exactly once and the same absolute
+     * positions are always requested under the same `(offset, limit)` pair.
      */
     @Test
-    fun f3_chunks_are_not_grid_aligned() = runTest {
+    fun f3_chunks_are_grid_aligned() = runTest {
         val calls = Calls()
         val p = pager(calls, latencyMs = 1)
         var latest: PagingData<Int>? = null
@@ -146,12 +148,11 @@ class DiagnosticsFindingsTest {
         latest!!.data[500]
         testScheduler.advanceUntilIdle()
 
-        // starts are centred on the key rather than snapped to a loadSize grid
-        calls.starts shouldBe listOf(490, 510, 480, 530, 460, 550, 440)
-        calls.starts.any { it % 20 != 0 } shouldBe true
-        // 490..509 and 480..499 overlap: position 490..499 is fetched twice
-        calls.starts.contains(490) shouldBe true
-        calls.starts.contains(480) shouldBe true
+        // the chunk holding the key comes first, the rest tiles the window outwards
+        calls.starts shouldBe listOf(500, 480, 520, 460, 540, 440)
+        calls.starts.all { it % 20 == 0 } shouldBe true
+        // no range is requested twice and none of them overlap
+        calls.starts.distinct() shouldBe calls.starts
         job.cancel()
     }
 
@@ -184,8 +185,8 @@ class DiagnosticsFindingsTest {
         latest!!.data[100]
         testScheduler.advanceUntilIdle()
 
-        // ...yet the pager fetches it all again
-        calls.starts shouldBe listOf(90, 110, 80, 130, 60)
+        // ...yet the pager fetches it all again (now as aligned chunks, but still redundantly)
+        calls.starts shouldBe listOf(100, 120, 80, 60)
         job.cancel()
     }
 
