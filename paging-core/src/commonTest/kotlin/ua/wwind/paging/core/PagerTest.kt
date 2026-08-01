@@ -72,11 +72,11 @@ class PagerTest {
         // Until first emission occurs, latest can be null; advance to ensure collection starts
         this.testScheduler.advanceUntilIdle()
         // Access triggers debounced loading
-        latest!!.data[target]
+        checkNotNull(latest).data[target]
 
         advanceFully(0)
 
-        val after = latest!!
+        val after = checkNotNull(latest)
         after.loadState.shouldBeInstanceOf<LoadState.Success>()
         // The requested key should now be present
         val entry = after.data[target].shouldBeInstanceOf<EntryState.Success<Int>>()
@@ -100,15 +100,15 @@ class PagerTest {
         this.testScheduler.advanceUntilIdle()
 
         // First move to 50
-        latest!!.data[50]
+        checkNotNull(latest).data[50]
         advanceFully(0)
-        val afterFirst = latest!!
+        val afterFirst = checkNotNull(latest)
         afterFirst.loadState.shouldBeInstanceOf<LoadState.Success>()
 
         // Then jump far to 400
         latest.data[400]
         advanceFully(0)
-        val afterSecond = latest!!
+        val afterSecond = checkNotNull(latest)
         afterSecond.loadState.shouldBeInstanceOf<LoadState.Success>()
 
         // Validate data window roughly within preload range around 400
@@ -130,10 +130,10 @@ class PagerTest {
         this.testScheduler.advanceUntilIdle()
 
         // Trigger load that will fail once
-        latest!!.data[200]
+        checkNotNull(latest).data[200]
         advanceFully(0)
 
-        val afterError = latest!!
+        val afterError = checkNotNull(latest)
         val errorState = afterError.loadState.shouldBeInstanceOf<LoadState.Error>()
         errorState.key shouldBe 200
 
@@ -141,7 +141,7 @@ class PagerTest {
         afterError.retry(errorState.key)
         advanceFully(0)
 
-        val afterRetry = latest!!
+        val afterRetry = checkNotNull(latest)
         afterRetry.loadState.shouldBeInstanceOf<LoadState.Success>()
         // Ensure requested item is now present
         val entry = afterRetry.data[200].shouldBeInstanceOf<EntryState.Success<Int>>()
@@ -158,19 +158,19 @@ class PagerTest {
         val job: Job = launch { pager.flow.collectLatest { latest = it } }
         this.testScheduler.advanceUntilIdle()
 
-        latest!!.data[200]
+        checkNotNull(latest).data[200]
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.advanceUntilIdle()
-        latest!!.loadState.shouldBeInstanceOf<LoadState.Error>()
+        latest.loadState.shouldBeInstanceOf<LoadState.Error>()
 
         val retriedAt = this.testScheduler.currentTime
-        latest!!.retry(200)
+        latest.retry(200)
         this.testScheduler.runCurrent()
 
         // The reload is scheduled straight away rather than after another debounce window
-        latest!!.loadState.shouldBeInstanceOf<LoadState.Success>()
+        latest.loadState.shouldBeInstanceOf<LoadState.Success>()
         this.testScheduler.currentTime shouldBe retriedAt
-        latest!!.data[200].shouldBeInstanceOf<EntryState.Success<Int>>()
+        latest.data[200].shouldBeInstanceOf<EntryState.Success<Int>>()
 
         job.cancel()
     }
@@ -190,7 +190,7 @@ class PagerTest {
         val job: Job = launch { pager.flow.collectLatest { latest = it } }
         this.testScheduler.advanceUntilIdle()
 
-        latest!!.data[500]
+        checkNotNull(latest).data[500]
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.advanceUntilIdle()
         starts.clear()
@@ -201,8 +201,8 @@ class PagerTest {
         // Reloaded around 500 - the position the user is actually looking at - not around 0
         starts.isEmpty() shouldBe false
         starts.all { it in 400..600 } shouldBe true
-        latest!!.data[500].shouldBeInstanceOf<EntryState.Success<Int>>()
-        latest!!.loadState.shouldBeInstanceOf<LoadState.Success>()
+        latest.data[500].shouldBeInstanceOf<EntryState.Success<Int>>()
+        latest.loadState.shouldBeInstanceOf<LoadState.Success>()
 
         job.cancel()
     }
@@ -223,7 +223,7 @@ class PagerTest {
         val job: Job = launch { pager.flow.collectLatest { latest = it } }
         this.testScheduler.advanceUntilIdle()
 
-        latest!!.data[500]
+        checkNotNull(latest).data[500]
         this.testScheduler.advanceTimeBy(300) // debounce elapsed, first chunk now in flight
         this.testScheduler.advanceTimeBy(25)
 
@@ -231,7 +231,7 @@ class PagerTest {
         pager.refresh()
         this.testScheduler.advanceUntilIdle()
 
-        val values = latest!!.data.values.values
+        val values = latest.data.values.values
         values.isEmpty() shouldBe false
         values.none { it.startsWith("e0-") } shouldBe true
 
@@ -275,7 +275,7 @@ class PagerTest {
         startedAt.clear()
         val jumpedAt = this.testScheduler.currentTime
 
-        latest!!.data[500]
+        checkNotNull(latest).data[500]
         this.testScheduler.advanceUntilIdle()
 
         // With the debounce switched off the jump is served immediately

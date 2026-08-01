@@ -131,14 +131,14 @@ class PagingMediatorTest {
         this.testScheduler.runCurrent()
 
         // Trigger load in window 0..4 by accessing position 3
-        latest!!.data[3]
+        checkNotNull(latest).data[3]
 
         // Advance only past debounce, then run current tasks to process local emission
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.runCurrent()
 
         // At this moment, only local portion was emitted, remote is still delayed
-        val afterLocal = latest!!
+        val afterLocal = checkNotNull(latest)
         afterLocal.loadState.shouldBeInstanceOf<LoadState.Loading>()
         afterLocal.data[3].shouldBeInstanceOf<EntryState.Loading>()
 
@@ -154,13 +154,13 @@ class PagingMediatorTest {
         val job2: Job = launch { mediator2.flow(Unit).collectLatest { latest2 = it } }
         this.testScheduler.runCurrent()
 
-        latest2!!.data[3]
+        checkNotNull(latest2).data[3]
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.runCurrent()
 
         // Complete remote1 and verify final success for first mediator; verify called missing ranges
         advanceFully(1_000)
-        val afterRemote = latest!!
+        val afterRemote = checkNotNull(latest)
         afterRemote.loadState.shouldBeInstanceOf<LoadState.Success>()
         // All positions in requested range should now be loaded
         (0..4).forEach { pos ->
@@ -209,14 +209,14 @@ class PagingMediatorTest {
 
         // Access key=0 to avoid an extra initial load due to initial keyTrigger value
         // With loadSize=5, startFetchRange should be 0..4
-        latest!!.data[0]
+        checkNotNull(latest).data[0]
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.runCurrent()
 
         // With key=0 and loadSize=5 on empty state, Pager should fetch one full chunk 0..4.
         remote.callArgs.distinct() shouldBe listOf(0 to 5)
 
-        val after = latest!!
+        val after = checkNotNull(latest)
         after.loadState.shouldBeInstanceOf<LoadState.Success>()
         (0..4).forEach { pos -> after.data[pos].shouldBeInstanceOf<EntryState.Success<Item>>() }
 
@@ -258,7 +258,7 @@ class PagingMediatorTest {
         this.testScheduler.runCurrent()
 
         // Trigger load for window 0..4
-        latest!!.data[1]
+        checkNotNull(latest).data[1]
         this.testScheduler.advanceTimeBy(300)
         this.testScheduler.runCurrent()
 
@@ -266,7 +266,7 @@ class PagingMediatorTest {
         local.clearCalls shouldBe 1
         (local.saveCalls >= 1) shouldBe true
 
-        val after = latest!!
+        val after = checkNotNull(latest)
         after.loadState.shouldBeInstanceOf<LoadState.Success>()
         // Size should now reflect remote's size (12)
         after.data.size shouldBe 12
@@ -303,7 +303,7 @@ class PagingMediatorTest {
         this.testScheduler.runCurrent()
 
         (0..19).forEach { index ->
-            latest!!.data[index]
+            checkNotNull(latest).data[index]
             this.testScheduler.advanceTimeBy(300)
             this.testScheduler.runCurrent()
         }
@@ -311,7 +311,7 @@ class PagingMediatorTest {
 
         remote.callArgs.distinct() shouldBe listOf(0 to 5, 5 to 5, 10 to 5, 15 to 5)
 
-        val after = latest!!
+        val after = checkNotNull(latest)
         after.loadState.shouldBeInstanceOf<LoadState.Success>()
         (0..19).forEach { pos -> after.data[pos].shouldBeInstanceOf<EntryState.Success<Item>>() }
 
