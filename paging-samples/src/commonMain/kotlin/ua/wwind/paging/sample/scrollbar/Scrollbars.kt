@@ -21,7 +21,6 @@ fun VerticalScrollbar(
     adapter: ScrollbarAdapter,
     modifier: Modifier = Modifier,
     style: ScrollbarStyle = defaultMaterialScrollbarStyle(),
-    enablePressToScroll: Boolean = false, // Reserved for future interactive behavior
 ) {
     Canvas(modifier = modifier.fillMaxHeight()) {
         val widthPx = style.thickness.toPx()
@@ -57,7 +56,6 @@ fun HorizontalScrollbar(
     adapter: ScrollbarAdapter,
     modifier: Modifier = Modifier,
     style: ScrollbarStyle = defaultMaterialScrollbarStyle(),
-    enablePressToScroll: Boolean = false,
 ) {
     Canvas(modifier = modifier.fillMaxWidth()) {
         val heightPx = style.thickness.toPx()

@@ -116,8 +116,8 @@ public class Pager<T>(
                     currentLoadingRange = plannedRange
                     val job = launch {
                         loadPortion(
-                            _data = data,
-                            _loadState = loadState,
+                            dataFlow = data,
+                            loadStateFlow = loadState,
                             mutex = mutex,
                             key = key,
                             primaryDirection = direction,
@@ -158,16 +158,19 @@ public class Pager<T>(
      * 4. Update cache, removing items outside cache range
      * 5. Handle errors gracefully with retry capability
      */
+    // Pre-existing complexity, left as-is when detekt was introduced so that the tooling change
+    // stays behaviour-neutral. Splitting this up is worth doing on its own terms.
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     private suspend fun loadPortion(
-        _data: MutableStateFlow<PagingMap<T>>,
-        _loadState: MutableStateFlow<LoadState>,
+        dataFlow: MutableStateFlow<PagingMap<T>>,
+        loadStateFlow: MutableStateFlow<LoadState>,
         mutex: Mutex,
         key: Int,
         primaryDirection: Direction,
         onGet: (Int) -> Unit,
     ) = mutex.withLock {
         try {
-            val pagingData = _data.value
+            val pagingData = dataFlow.value
 
             // Calculate the valid range of positions
             val fullRange = 0..<pagingData.size.coerceAtLeast(1)
@@ -233,7 +236,8 @@ public class Pager<T>(
             val afterChunks: List<IntRange> = extendEdges(afterRangesRaw)
                 .flatMap { it.chunkedRanges(loadSize) }
 
-            // Directional prioritization: when moving up (new key < old), load increasing indices first; else decreasing first
+            // Directional prioritization: when moving up (new key < old), load increasing
+            // indices first; else decreasing first
             val directionalChunks: List<IntRange> = when (primaryDirection) {
                 Direction.Increase -> afterChunks + beforeChunks
                 Direction.Decrease -> beforeChunks + afterChunks
@@ -256,14 +260,14 @@ public class Pager<T>(
             enqueue
                 .toNonEmptyListOrNull() // Only proceed if there's something to load
                 ?.also {
-                    _loadState.value = LoadState.Loading // Signal loading started
+                    loadStateFlow.value = LoadState.Loading // Signal loading started
                 }?.onEach { fetchRange ->
                     // Load each range
                     val loadSize = fetchRange.last - fetchRange.first + 1
                     readData(fetchRange.first, loadSize)
                         .collect { portion ->
                             // Build a new immutable map snapshot for each emission to ensure StateFlow emits
-                            _data.update { currentData ->
+                            dataFlow.update { currentData ->
                                 if (currentData.size != portion.totalSize) {
                                     dataMap = portion.values
                                     dataMapPruned = false
@@ -289,14 +293,14 @@ public class Pager<T>(
                             }
                         }
                 }?.also {
-                    _loadState.value = LoadState.Success // Signal loading completed
+                    loadStateFlow.value = LoadState.Success // Signal loading completed
                 }
         } catch (e: CancellationException) {
             // Preserve cancellation for proper coroutine cleanup
             throw e
         } catch (e: Exception) {
             // Convert other exceptions to LoadState.Error for retry handling
-            _loadState.value = LoadState.Error(e, key)
+            loadStateFlow.value = LoadState.Error(e, key)
         }
     }
 

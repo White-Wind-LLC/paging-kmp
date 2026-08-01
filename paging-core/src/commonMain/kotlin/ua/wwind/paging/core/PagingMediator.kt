@@ -56,10 +56,12 @@ public class PagingMediator<T, Q>(
      * Loads the requested range [position, position + size - 1].
      *
      * Steps:
-     * 1) Read from local storage, optionally either emit raw local data (see [PagingMediatorConfig.emitOutdatedRecords]),
-     *    or emit the filtered local portion where stale records are removed via [PagingMediatorConfig.isRecordStale].
+     * 1) Read from local storage, optionally either emit raw local data
+     *    (see [PagingMediatorConfig.emitOutdatedRecords]), or emit the filtered local portion
+     *    where stale records are removed via [PagingMediatorConfig.isRecordStale].
      * 2) Compute missing contiguous subranges and fetch them from the remote source (optionally in parallel).
-     * 3) Optionally emit intermediate remote portions as they arrive (see [PagingMediatorConfig.emitIntermediateResults]).
+     * 3) Optionally emit intermediate remote portions as they arrive
+     *    (see [PagingMediatorConfig.emitIntermediateResults]).
      * 4) Emit a merged portion and a final marker which triggers cache persistence upstream.
      *
      * Total size consistency:

@@ -17,6 +17,7 @@ class FakeUserRemoteDataSource : UserRemoteDataSource {
         private const val TOTAL_USERS = 2500
         private const val MIN_NETWORK_DELAY_MS = 1000L
         private const val MAX_NETWORK_DELAY_MS = 2000L
+        private const val SIMULATED_ERROR_RATE = 0.05f
 
         private val firstNames = listOf(
             "John", "Jane", "Alice", "Bob", "Charlie", "Diana", "Edward", "Fiona",
@@ -41,9 +42,9 @@ class FakeUserRemoteDataSource : UserRemoteDataSource {
         // Simulate longer network delay for better demonstration
         delay(Random.nextLong(MIN_NETWORK_DELAY_MS, MAX_NETWORK_DELAY_MS))
 
-        // Simulate potential errors (5% chance)
-        if (Random.nextFloat() < 0.05f) {
-            throw Exception("Network error: Failed to fetch users")
+        // Simulate potential errors
+        if (Random.nextFloat() < SIMULATED_ERROR_RATE) {
+            throw IllegalStateException("Network error: Failed to fetch users")
         }
 
         val users = generateUsers(offset, limit)

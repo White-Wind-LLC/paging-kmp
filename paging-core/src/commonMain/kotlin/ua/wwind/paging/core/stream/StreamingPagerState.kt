@@ -110,7 +110,8 @@ internal class StreamingPagerState<T>(
                 logger.d { "openStream: start collecting range=$range size=$fetchSize" }
                 readPortion(range.first, fetchSize).collect { values ->
                     logger.d {
-                        "onPortion(range=$range, count=${values.size}, keys=${values.keys.minOrNull()}..${values.keys.maxOrNull()})"
+                        "onPortion(range=$range, count=${values.size}, " +
+                            "keys=${values.keys.minOrNull()}..${values.keys.maxOrNull()})"
                     }
                     onPortion(values)
                     rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
@@ -192,6 +193,9 @@ internal class StreamingPagerState<T>(
         }
     }
 
+    // Pre-existing complexity, left as-is when detekt was introduced so that the tooling change
+    // stays behaviour-neutral. Splitting this up is worth doing on its own terms.
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     suspend fun tryAdjustStreamsForKey(key: Int, scope: CoroutineScope) = mutex.withLock {
         logger.d { "tryAdjustStreamsForKey: key=$key" }
         cleanupInactiveStreamsLocked()
