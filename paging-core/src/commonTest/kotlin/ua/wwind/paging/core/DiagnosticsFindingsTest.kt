@@ -119,7 +119,7 @@ class DiagnosticsFindingsTest {
         calls.starts.clear()
 
         val t0 = currentTime
-        latest!!.data[500]
+        checkNotNull(latest).data[500]
         testScheduler.advanceUntilIdle()
 
         calls.starts.size shouldBe 7
@@ -142,7 +142,7 @@ class DiagnosticsFindingsTest {
         testScheduler.advanceUntilIdle()
         calls.starts.clear()
 
-        latest!!.data[500]
+        checkNotNull(latest).data[500]
         testScheduler.advanceUntilIdle()
 
         // starts are centred on the key rather than snapped to a loadSize grid
@@ -170,17 +170,17 @@ class DiagnosticsFindingsTest {
         val job = launch { p.flow.collectLatest { latest = it } }
         testScheduler.advanceUntilIdle()
 
-        latest!!.data[100]
+        checkNotNull(latest).data[100]
         testScheduler.advanceUntilIdle()
-        latest!!.data[600]
+        latest.data[600]
         testScheduler.advanceUntilIdle()
 
         // everything around 100 is cached and nothing was evicted (cacheSize = 1000)
-        val cachedAround100 = (60..140).count { it in latest!!.data.values }
+        val cachedAround100 = (60..140).count { it in latest.data.values }
         cachedAround100 shouldBe 80
         calls.starts.clear()
 
-        latest!!.data[100]
+        latest.data[100]
         testScheduler.advanceUntilIdle()
 
         // ...yet the pager fetches it all again
@@ -214,19 +214,19 @@ class DiagnosticsFindingsTest {
         val job = launch { p.flow.collectLatest { latest = it } }
         testScheduler.advanceUntilIdle()
 
-        val failedKey = (latest!!.loadState as LoadState.Error).key
+        val failedKey = (checkNotNull(latest).loadState as LoadState.Error).key
         val before = attempts.size
 
-        latest!!.retry(failedKey) // the documented call
+        latest.retry(failedKey) // the documented call
         testScheduler.advanceUntilIdle()
 
         attempts.size shouldBe before // nothing was retried
-        (latest!!.loadState is LoadState.Error) shouldBe true
+        (latest.loadState is LoadState.Error) shouldBe true
 
-        latest!!.retry(failedKey + 1) // only a *different* key works
+        latest.retry(failedKey + 1) // only a *different* key works
         testScheduler.advanceUntilIdle()
         attempts.size shouldBe before + 1
-        latest!!.loadState shouldBe LoadState.Success
+        latest.loadState shouldBe LoadState.Success
         job.cancel()
     }
 
@@ -248,16 +248,16 @@ class DiagnosticsFindingsTest {
         var latest: PagingData<String>? = null
         val job = launch { p.flow.collectLatest { latest = it } }
         testScheduler.advanceUntilIdle()
-        latest!!.data.values.size shouldBe 20
+        checkNotNull(latest).data.values.size shouldBe 20
 
         p.refresh()
         testScheduler.advanceUntilIdle()
-        latest!!.data.values.size shouldBe 0
-        latest!!.loadState shouldBe LoadState.Success // "success", but empty
+        latest.data.values.size shouldBe 0
+        latest.loadState shouldBe LoadState.Success // "success", but empty
 
-        latest!!.data[0] // re-access same key
+        latest.data[0] // re-access same key
         testScheduler.advanceUntilIdle()
-        latest!!.data.values.size shouldBe 0 // still empty
+        latest.data.values.size shouldBe 0 // still empty
         job.cancel()
     }
 
@@ -285,7 +285,7 @@ class DiagnosticsFindingsTest {
         testScheduler.advanceUntilIdle()
         transitions.clear()
 
-        latest!!.data[70] // small scroll, data already cached
+        checkNotNull(latest).data[70] // small scroll, data already cached
         testScheduler.advanceUntilIdle()
 
         transitions shouldBe listOf("Loading", "Success")
@@ -308,17 +308,17 @@ class DiagnosticsFindingsTest {
         var latest: PagingData<String>? = null
         val job = launch { p.flow.collectLatest { latest = it } }
         testScheduler.advanceUntilIdle()
-        latest!!.data[95]
+        checkNotNull(latest).data[95]
         testScheduler.advanceUntilIdle()
-        latest!!.loadState shouldBe LoadState.Success
+        latest.loadState shouldBe LoadState.Success
 
         s.items.value = s.items.value.take(40) // total shrinks 100 -> 40
         testScheduler.advanceUntilIdle()
 
-        latest!!.data.size shouldBe 40
+        latest.data.size shouldBe 40
         // every item is present, and the pager reports it
-        latest!!.data.values.size shouldBe 40
-        latest!!.loadState shouldBe LoadState.Success
+        latest.data.values.size shouldBe 40
+        latest.loadState shouldBe LoadState.Success
         job.cancel()
     }
 
@@ -356,11 +356,11 @@ class DiagnosticsFindingsTest {
         testScheduler.advanceUntilIdle()
 
         val openedBeforeJump = s.portionOpens.size
-        latest!!.data[500]
+        checkNotNull(latest).data[500]
         testScheduler.advanceUntilIdle()
 
         val streamedForViewport = s.portionOpens.drop(openedBeforeJump).sumOf { it.second }
-        val retained = latest!!.data.values.size
+        val retained = latest.data.values.size
         streamedForViewport shouldBe 220
         retained shouldBe streamedForViewport
         job.cancel()

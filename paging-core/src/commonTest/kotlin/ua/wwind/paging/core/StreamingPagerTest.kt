@@ -146,11 +146,11 @@ class StreamingPagerTest {
         advanceFully(50)
 
         // Load [0..9]
-        latest!!.data[0]
+        checkNotNull(latest).data[0]
         advanceFully(50)
         src.emitPortion(0, 5, (0..4).associateWith { it })
         advanceFully(10)
-        latest!!.data[8]
+        latest.data[8]
         advanceFully(50)
         src.emitPortion(5, 5, (5..9).associateWith { it })
         advanceFully(10)
@@ -158,9 +158,9 @@ class StreamingPagerTest {
         // Now shrink total to 7 -> keys > 6 must be pruned
         src.totalFlow.value = 7
         advanceFully(10)
-        latest!!.data.size shouldBe 7
+        latest.data.size shouldBe 7
         // lastKey should be <= 6
-        (latest!!.data.lastKey() <= 6) shouldBe true
+        (latest.data.lastKey() <= 6) shouldBe true
 
         job.cancel()
     }
@@ -185,19 +185,19 @@ class StreamingPagerTest {
         advanceFully(10)
 
         // Move the viewport to the tail of the list.
-        latest!!.data[18]
+        checkNotNull(latest).data[18]
         advanceFully(10)
         src.emitPortion(10, 5, (10..14).associateWith { it })
         src.emitPortion(15, 5, (15..19).associateWith { it })
         advanceFully(10)
-        latest!!.loadState shouldBe LoadState.Success
+        latest.loadState shouldBe LoadState.Success
 
         // Total shrinks well below the last read key (18 -> clamped to index 9).
         src.totalFlow.value = 10
         advanceFully(10)
 
-        latest!!.data.size shouldBe 10
-        latest!!.loadState shouldBe LoadState.Success
+        latest.data.size shouldBe 10
+        latest.loadState shouldBe LoadState.Success
 
         job.cancel()
     }
@@ -217,7 +217,7 @@ class StreamingPagerTest {
         advanceFully(10)
 
         // Read at 7 so that [5..9] and [10..14] are streaming alongside [0..4].
-        latest!!.data[7]
+        checkNotNull(latest).data[7]
         advanceFully(10)
         src.emitPortion(0, 5, (0..4).associateWith { it })
         src.emitPortion(5, 5, (5..9).associateWith { it })
@@ -229,12 +229,12 @@ class StreamingPagerTest {
         src.totalFlow.value = 9
         advanceFully(10)
 
-        latest!!.data.size shouldBe 9
+        latest.data.size shouldBe 9
         src.subscribers(5, 5) shouldBe 0
         src.subscribers(10, 5) shouldBe 0
         // [0..4] is fully in bounds and stays put, so nothing is left loading.
         src.subscribers(0, 5) shouldBe 1
-        latest!!.loadState shouldBe LoadState.Success
+        latest.loadState shouldBe LoadState.Success
 
         job.cancel()
     }
@@ -260,21 +260,21 @@ class StreamingPagerTest {
         advanceFully(50)
 
         // Fill the cache around key 0
-        latest!!.data[0]
+        checkNotNull(latest).data[0]
         advanceFully(50)
         src.emitPortion(0, 5, (0..4).associateWith { it })
         advanceFully(10)
-        latest!!.data.values.keys.contains(0) shouldBe true
+        latest.data.values.keys.contains(0) shouldBe true
 
         // Move the viewport far away: cacheRange becomes 90..110
-        latest!!.data[100]
+        latest.data[100]
         advanceFully(50)
         src.emitPortion(100, 5, (100..104).associateWith { it })
         advanceFully(10)
 
         // The incoming portion is cached, the values left behind by the old viewport are gone
-        latest!!.data.values.keys.contains(100) shouldBe true
-        latest!!.data.values.keys.none { it < 90 } shouldBe true
+        latest.data.values.keys.contains(100) shouldBe true
+        latest.data.values.keys.none { it < 90 } shouldBe true
 
         job.cancel()
     }
@@ -300,15 +300,15 @@ class StreamingPagerTest {
         advanceFully(350)
 
         // Open first range [0..4]
-        latest!!.data[2]
+        checkNotNull(latest).data[2]
         advanceFully(350)
         src.emitPortion(0, 5, (0..4).associateWith { it })
         src.emitPortion(5, 5, (5..9).associateWith { it })
         advanceFully(100)
-        latest!!.loadState shouldBe LoadState.Success
+        latest.loadState shouldBe LoadState.Success
 
         // Access far key to open another range near 20
-        latest!!.data[20]
+        latest.data[20]
         advanceFully(350)
         // New ranges opened; global state will update after emissions
 
@@ -317,7 +317,7 @@ class StreamingPagerTest {
         src.emitPortion(20, 5, (20..24).associateWith { it })
         src.emitPortion(25, 5, (25..29).associateWith { it })
         advanceFully(10)
-        latest!!.loadState shouldBe LoadState.Success
+        latest.loadState shouldBe LoadState.Success
 
         job.cancel()
     }
@@ -359,7 +359,7 @@ class StreamingPagerTest {
         latest?.loadState.shouldBeInstanceOf<LoadState.Error>()
         totalCalls shouldBe 1
 
-        latest!!.retry(0)
+        latest.retry(0)
         testScheduler.runCurrent()
         totalCalls shouldBe 2
         latest.loadState shouldBe LoadState.Loading
