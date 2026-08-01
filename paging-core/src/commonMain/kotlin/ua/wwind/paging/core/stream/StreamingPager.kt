@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ua.wwind.paging.core.BuildKonfig
 import ua.wwind.paging.core.ExperimentalStreamingPagerApi
@@ -111,7 +112,9 @@ public class StreamingPager<T>(
         val emitter = launch {
             combine(state.data, state.loadStateFlow) { data: PagingMap<T>, loadState ->
                 PagingData(data, loadState) { key ->
-                    state.onGet(key)
+                    // Straight to the trigger, not through `onGet`: a retry has to reach the
+                    // planner even when the key sits in the settled range.
+                    state.keyTrigger.update { key }
                     retryRequests.tryEmit(Unit)
                 }
             }.collect { paging ->

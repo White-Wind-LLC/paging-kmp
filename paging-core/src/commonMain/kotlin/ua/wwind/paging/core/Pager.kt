@@ -108,8 +108,17 @@ public class Pager<T>(
         // StateFlow conflates equal values, so routing a retry through it would emit nothing.
         val retryRequests: MutableSharedFlow<Int> = MutableSharedFlow(extraBufferCapacity = 64)
 
+        // Positions an access to which cannot change anything this pager would do; see
+        // `settledRangeAround`. Empty while a load is in flight, so nothing is suppressed until
+        // the cache is known to hold the window.
+        val settledRange: MutableStateFlow<IntRange> = MutableStateFlow(IntRange.EMPTY)
+
         // Entry access
         fun onGet(key: Int) {
+            // A list re-reads every visible row on each recomposition, so this runs per row per
+            // frame. Deep inside the loaded window the answer is always "nothing to do", and the
+            // CAS below - which also restarts the debounce - is pure overhead there.
+            if (key in settledRange.value) return
             keyTrigger.update { key }
         }
 
@@ -172,6 +181,7 @@ public class Pager<T>(
                         currentLoadJob = null
                         currentLoadingRange = null
                         data.update { it.copy(values = persistentMapOf()) }
+                        settledRange.value = IntRange.EMPTY
                         lastReadKey = -1
                     }
 
@@ -204,6 +214,7 @@ public class Pager<T>(
                         key = key,
                         primaryDirection = direction,
                         onGet = ::onGet,
+                        settledRange = settledRange,
                     )
                 }
                 currentLoadJob = job
@@ -246,6 +257,10 @@ public class Pager<T>(
      *
      * [mutex] is only taken around the cache transitions inside [runLoads]; holding it across the
      * fetches would serialise them and block the next load behind the one it supersedes.
+     *
+     * [settledRange] is cleared for the duration of the pass and recomputed from what the cache
+     * actually ended up holding, so a pass that is cancelled or fails leaves every access
+     * triggering.
      */
     private suspend fun loadPortion(
         dataFlow: MutableStateFlow<PagingMap<T>>,
@@ -254,8 +269,10 @@ public class Pager<T>(
         key: Int,
         primaryDirection: Direction,
         onGet: (Int) -> Unit,
+        settledRange: MutableStateFlow<IntRange>,
     ) {
         try {
+            settledRange.value = IntRange.EMPTY
             val pagingData = dataFlow.value
             val plan = planLoad(pagingData, key, primaryDirection)
             runLoads(
@@ -266,6 +283,8 @@ public class Pager<T>(
                 mutex = mutex,
                 onGet = onGet,
             )
+            // A page of lead time before the edge is what keeps the window moving ahead of a scroll
+            settledRange.value = dataFlow.value.settledRangeAround(key, margin = loadSize)
         } catch (e: CancellationException) {
             // Preserve cancellation for proper coroutine cleanup
             throw e

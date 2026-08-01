@@ -25,8 +25,21 @@ All notable changes to this project will be documented in this file.
   900 ms for a ±60 item window over a 100 ms backend, of which the chunk the user is actually looking at was only the
   first 100 ms. It now costs `ceil(chunks / concurrency)` round trips (500 ms for the same jump, debounce included).
 
+- A `compose_compiler_config.conf` at the repository root declaring every UI-facing type stable to the Compose compiler
+  (#16). `paging-core` is built without the Compose compiler plugin - which is what keeps it free of a Compose runtime
+  dependency - and the compiler only infers stability for classes it compiles itself, so it treated `PagingData` and
+  everything around it as unstable: a composable taking one was never skippable and re-ran on every emission, however
+  little had changed. Copy the file and point `composeCompiler { stabilityConfigurationFiles }` at it; the README
+  documents the setup and how to verify it with a Compose compiler report.
+
 ### Changed
 
+- Reading an already loaded position no longer notifies the pager (#16). `PagingMap.get` is what tells the pager where
+  the viewport is, and a `LazyColumn` re-reads every visible row on every recomposition - each read updating a
+  `MutableStateFlow` and restarting the key debounce, on the UI thread. Both pagers now track the stretch of positions
+  whose access cannot change anything they would do, which is the loaded window pulled in by `loadSize` on each side,
+  and reading inside it costs nothing but the lookup. Reads within a page of the window edge still move the window, and
+  a `refresh()`, a failed load or a hole left by a short portion puts every read back in play.
 - `Pager.flow` and `StreamingPager.flow` are now conflated (#12). `PagingData` is a complete snapshot of the list, so
   only the newest one is worth rendering, but the `channelFlow` underneath buffered 64 of them: a UI slower than the
   source - which a live SSE stream easily is - worked through a queue of states it rendered and immediately discarded.

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -23,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.Flow
 import ua.wwind.paging.core.EntryState
 import ua.wwind.paging.core.LoadState
+import ua.wwind.paging.core.PagingData
+import ua.wwind.paging.sample.domain.model.User
 import ua.wwind.paging.sample.presentation.components.EmptyState
 import ua.wwind.paging.sample.presentation.components.ErrorOverlay
 import ua.wwind.paging.sample.presentation.components.LoadingItem
@@ -89,61 +92,7 @@ fun UserListScreen(
                     EmptyState(modifier = Modifier.align(Alignment.Center))
                 } else {
                     // User list with pagination
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(
-                                start = 16.dp,
-                                top = 16.dp,
-                                end = 32.dp, // Extra space for scrollbar
-                                bottom = 16.dp,
-                            ),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            items(
-                                count = data.data.size,
-                                key = { it },
-                            ) { index ->
-                                when (val userEntry = data.data[index]) {
-                                    EntryState.Loading -> {
-                                        LoadingItem(index)
-                                    }
-
-                                    is EntryState.Success -> {
-                                        UserCard(
-                                            user = userEntry.value,
-                                            modifier = Modifier.animateItem(),
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Global loading indicator
-                            if (data.loadState == LoadState.Loading) {
-                                item {
-                                    Box(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.padding(16.dp),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // Vertical Scrollbar
-                        VerticalScrollbar(
-                            adapter = rememberScrollbarAdapter(listState),
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .fillMaxHeight()
-                                .width(12.dp)
-                                .padding(end = 4.dp),
-                        )
-                    }
+                    UserList(pagingData = data, listState = listState)
                 }
 
                 // Error handling overlay
@@ -157,5 +106,72 @@ fun UserListScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * The list itself, taking the snapshot as a parameter.
+ *
+ * `PagingData` is only a skippable parameter because the repository-root
+ * `compose_compiler_config.conf` declares it stable - `paging-core` is built without the Compose
+ * compiler plugin, so nothing else would tell the compiler that a snapshot never changes under it.
+ * Without that, this composable would re-run on every emission of the pager.
+ */
+@Composable
+private fun UserList(pagingData: PagingData<User>, listState: LazyListState, modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = 16.dp,
+                end = 32.dp, // Extra space for scrollbar
+                bottom = 16.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(
+                count = pagingData.data.size,
+                key = { it },
+            ) { index ->
+                when (val userEntry = pagingData.data[index]) {
+                    EntryState.Loading -> {
+                        LoadingItem(index)
+                    }
+
+                    is EntryState.Success -> {
+                        UserCard(
+                            user = userEntry.value,
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
+                }
+            }
+
+            // Global loading indicator
+            if (pagingData.loadState == LoadState.Loading) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        // Vertical Scrollbar
+        VerticalScrollbar(
+            adapter = rememberScrollbarAdapter(listState),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(12.dp)
+                .padding(end = 4.dp),
+        )
     }
 }

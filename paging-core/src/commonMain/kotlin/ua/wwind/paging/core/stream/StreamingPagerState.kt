@@ -21,6 +21,7 @@ import ua.wwind.paging.core.LoadState
 import ua.wwind.paging.core.PagingMap
 import ua.wwind.paging.core.mergeIntoCache
 import ua.wwind.paging.core.pruneToRange
+import ua.wwind.paging.core.settledRangeAround
 
 /**
  * Returns this map with [range] set to [state], or this very instance when it already holds it.
@@ -45,7 +46,20 @@ internal class StreamingPagerState<T>(
     var lastReadKey: Int = 0
     var previousKey: Int = 0
 
+    /**
+     * Positions whose access cannot move the streamed window; see [settledRangeAround].
+     *
+     * A page of lead time before the edge of the window is what keeps it shifting ahead of a
+     * scroll. Empty until portions have actually arrived, so nothing is suppressed before the cache
+     * is known to hold the window.
+     */
+    val settledRange: MutableStateFlow<IntRange> = MutableStateFlow(IntRange.EMPTY)
+
     fun onGet(key: Int) {
+        // A list re-reads every visible row on each recomposition, so this runs per row per frame.
+        // Deep inside the streamed window the answer is always "nothing to do", and the CAS below -
+        // which also restarts the debounce - is pure overhead there.
+        if (key in settledRange.value) return
         keyTrigger.update { key }
     }
 
@@ -88,6 +102,7 @@ internal class StreamingPagerState<T>(
         mutex.withLock {
             val cacheRange = ((lastReadKey - config.cacheSize)..(lastReadKey + config.cacheSize))
             val pruneExisting = prunedCacheRange != cacheRange
+            val keyCountBefore = data.value.values.size
             data.update { current ->
                 val merged = current.values.mergeIntoCache(values, cacheRange, pruneExisting)
                 if (merged === current.values) {
@@ -101,6 +116,12 @@ internal class StreamingPagerState<T>(
                 }
             }
             prunedCacheRange = cacheRange
+            // A portion that only carries new values for positions already cached leaves the
+            // settled range exactly where it was, and re-scanning the cache for it would put an
+            // O(cache) walk on the hot path of a live stream.
+            if (pruneExisting || data.value.values.size != keyCountBefore) {
+                settledRange.value = data.value.settledRangeAround(lastReadKey, margin = config.loadSize)
+            }
             null
         }
     }
@@ -163,6 +184,7 @@ internal class StreamingPagerState<T>(
                 onGet = ::onGet,
             )
         }
+        settledRange.value = data.value.settledRangeAround(lastReadKey, margin = config.loadSize)
 
         // Valid indices are `0..<newTotal`, so a range is out of bounds as soon as it touches
         // `newTotal`. For a non-empty range `first <= last`, so testing `last` covers both ends.
@@ -214,6 +236,7 @@ internal class StreamingPagerState<T>(
 
         previousKey = lastReadKey
         lastReadKey = key
+        settledRange.value = data.value.settledRangeAround(lastReadKey, margin = config.loadSize)
     }
 
     /**

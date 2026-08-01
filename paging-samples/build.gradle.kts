@@ -93,6 +93,23 @@ kotlin {
     }
 }
 
+// `paging-core` is built without the Compose compiler plugin, so the compiler cannot infer
+// stability for its types and would treat every one of them as unstable. The configuration file
+// declares them stable; it lives at the repository root so that consumers can copy it verbatim.
+composeCompiler {
+    stabilityConfigurationFiles.add(
+        rootProject.layout.projectDirectory.file("compose_compiler_config.conf"),
+    )
+
+    // `./gradlew :paging-samples:compileKotlinJvm -PcomposeReports` writes the compiler's own
+    // stability report next to the classes, which is how the configuration above is verified.
+    if (providers.gradleProperty("composeReports").isPresent) {
+        val reports = layout.buildDirectory.dir("compose-reports")
+        reportsDestination.set(reports)
+        metricsDestination.set(reports)
+    }
+}
+
 compose.desktop {
     application {
         mainClass = "MainKt"
