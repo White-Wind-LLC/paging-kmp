@@ -164,7 +164,7 @@ public class PagingMediator<T, Q>(
         } else {
             fetchedPortions
                 .reduce { acc, portion ->
-                    acc.copy(values = acc.values.putAll(portion.values))
+                    acc.copy(values = acc.values.puttingAll(portion.values))
                 }.also {
                     if (shouldEmitMergedPortion) emit(it to false)
                     emit(it to true)
