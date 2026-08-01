@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Dropped the `macosX64` (Intel macOS) target from `paging-core`; the `paging-core-macosx64` artifact is no longer
+  published. Kotlin 2.4 deprecates the target and will remove it in a future release, as Apple winds down x86_64
+  support. `macosArm64` (Apple Silicon) is unaffected, as are `iosX64`, `linuxX64` and `mingwX64`.
+
 ### Changed
 
 - `Pager`, `StreamingPagerConfig` and `PagingMediatorConfig` now reject a cache narrower than the preload window
@@ -14,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - `StreamingPagerConfig` validates itself in its own `init` instead of in `StreamingPager`, so `copy()` is covered too.
 - Bumped library versions: Kotlin to 2.4.10, kotlinx-coroutines to 1.11.0, Compose Multiplatform to 1.11.1,
   `androidx-activity-compose` to 1.13.0, `kotlinx-collections-immutable` to 0.5.1, and Kermit to 2.1.0.
+- Bumped the BuildKonfig Gradle plugin to 0.22.0 (build-only, no effect on the published artifacts).
 - `paging-samples` no longer builds the `iosX64` target — Compose Multiplatform 1.11 stopped publishing artifacts for
   it. The published `paging-core` library keeps `iosX64` and its full target set unchanged.
 
