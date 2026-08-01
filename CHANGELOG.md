@@ -27,6 +27,16 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `Pager.flow` and `StreamingPager.flow` are now conflated (#12). `PagingData` is a complete snapshot of the list, so
+  only the newest one is worth rendering, but the `channelFlow` underneath buffered 64 of them: a UI slower than the
+  source - which a live SSE stream easily is - worked through a queue of states it rendered and immediately discarded.
+  A collector that falls behind now receives the current state instead. Nothing is lost, since every snapshot carries
+  the whole window; only intermediate `LoadState` transitions can be skipped.
+- `StreamingPager` no longer re-emits its aggregated `LoadState` when it did not change (#12). The per-range map
+  underneath is touched by every streamed message, while the single state derived from it moves only when a range
+  actually opens or settles, so a portion arriving next to a range that was still loading used to reach the UI as two
+  `PagingData` instead of one. Marking a range with the state it already holds is also skipped outright now, instead of
+  rebuilding the map for it once per streamed message.
 - `Pager` now snaps every fetch range to a `loadSize` grid anchored at 0, instead of centring the first chunk on the
   accessed position (#10). Chunk starts used to depend on where the user landed, so a single jump issued overlapping
   requests (`490..509` and `480..499` for `key=500`, `loadSize=20`) and the same positions were fetched twice; the same

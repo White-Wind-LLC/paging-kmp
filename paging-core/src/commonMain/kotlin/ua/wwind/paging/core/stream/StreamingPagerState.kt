@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
@@ -20,6 +21,17 @@ import ua.wwind.paging.core.LoadState
 import ua.wwind.paging.core.PagingMap
 import ua.wwind.paging.core.mergeIntoCache
 import ua.wwind.paging.core.pruneToRange
+
+/**
+ * Returns this map with [range] set to [state], or this very instance when it already holds it.
+ *
+ * Every message of a portion stream marks its range `Success`, so after the first one the write
+ * changes nothing. Handing the same instance back keeps that case free of an allocation.
+ */
+internal fun Map<IntRange, LoadState>?.withRangeState(range: IntRange, state: LoadState): Map<IntRange, LoadState> {
+    if (this != null && this[range] == state) return this
+    return this.orEmpty() + (range to state)
+}
 
 internal class StreamingPagerState<T>(
     val config: StreamingPagerConfig,
@@ -52,6 +64,9 @@ internal class StreamingPagerState<T>(
             }
         }
         .onStart { emit(LoadState.Loading) }
+        // The map underneath changes on every streamed message; the state derived from it rarely
+        // does. Without this, each repeat travels through `combine` as another `PagingData`.
+        .distinctUntilChanged()
 
     val activeStreams: MutableMap<IntRange, Job> = LinkedHashMap()
 
@@ -114,7 +129,7 @@ internal class StreamingPagerState<T>(
                     }
                     onPortion(values)
                     rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
-                        current.orEmpty() + (range to LoadState.Success)
+                        current.withRangeState(range, LoadState.Success)
                     }
                 }
             } catch (e: CancellationException) {
@@ -123,7 +138,7 @@ internal class StreamingPagerState<T>(
             } catch (t: Throwable) {
                 logger.e(t) { "openStream: error in range=$range" }
                 rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
-                    current.orEmpty() + (range to LoadState.Error(t, range.first))
+                    current.withRangeState(range, LoadState.Error(t, range.first))
                 }
             } finally {
                 removeStreamByRange(range)
