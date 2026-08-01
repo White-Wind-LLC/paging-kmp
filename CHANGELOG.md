@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- StreamingPager: the pager no longer reports `LoadState.Loading` forever after the total shrinks. The out-of-bounds
+  key clamp and the stream close filter were both off by one, which produced an empty chunk that was marked as loading
+  but never opened, so the marker was never cleared (#5).
+- StreamingPager: a portion stream covering exactly the new boundary index is now closed when the total shrinks,
+  instead of being left open past the end of the list.
+
+### Tests
+
+- Added regression coverage for the shrink path in `StreamingPagerTest`, plus `WindowHelpersTest` pinning the invariant
+  that the chunk planner never returns an empty range for an out-of-bounds key.
+
 ## [2.2.7] - 2026-03-05
 
 ### Fixed

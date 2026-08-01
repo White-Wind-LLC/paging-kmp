@@ -292,13 +292,16 @@ class DiagnosticsFindingsTest {
     }
 
     /**
-     * F7b: when the total shrinks so that the clamped key lands exactly on the
-     * new boundary, `tryAdjustStreamsForKey` marks an EMPTY chunk as Loading and
-     * `openStream` early-returns for it, so the marker is never cleared and the
-     * pager reports Loading forever.
+     * F7b (fixed): `onTotalChanged` used to clamp the read key to the new total rather than to the
+     * last valid index, so the key landed exactly on the boundary and `alignedChunkContaining`
+     * returned an EMPTY chunk. `tryAdjustStreamsForKey` marked it Loading, `openStream`
+     * early-returned for it, and the marker was never cleared - the pager reported Loading forever.
+     *
+     * The key is now clamped to `newTotal - 1`, `planStreamWindow` clamps out-of-bounds keys itself,
+     * and empty ranges are never marked Loading. The pager settles back to Success.
      */
     @Test
-    fun f7b_total_shrink_leaves_loadstate_stuck_on_loading() = runTest {
+    fun f7b_total_shrink_settles_back_to_success() = runTest {
         val s = FakeStream(100)
         val p = streamingPager(s, ua.wwind.paging.core.stream.StreamingPagerConfig(20, 20, 200))
         var latest: PagingData<String>? = null
@@ -312,9 +315,9 @@ class DiagnosticsFindingsTest {
         testScheduler.advanceUntilIdle()
 
         latest!!.data.size shouldBe 40
-        // every item is present, yet the pager is permanently "loading"
+        // every item is present, and the pager reports it
         latest!!.data.values.size shouldBe 40
-        latest!!.loadState shouldBe LoadState.Loading
+        latest!!.loadState shouldBe LoadState.Success
         job.cancel()
     }
 
