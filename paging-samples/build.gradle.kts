@@ -35,8 +35,8 @@ kotlin {
         binaries.executable()
     }
 
+    // Compose Multiplatform 1.11 no longer publishes iosX64 artifacts, so the sample skips that target.
     listOf(
-        iosX64(),
         iosArm64(),
         iosSimulatorArm64()
     ).forEach {
