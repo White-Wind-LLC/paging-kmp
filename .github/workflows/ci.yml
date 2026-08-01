@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  test-linux:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Cache Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            konan-${{ runner.os }}-
+
+      - name: Tune Gradle memory for CI runner
+        run: |
+          mkdir -p ~/.gradle
+          {
+            echo "org.gradle.jvmargs=-Xmx4g"
+            echo "kotlin.daemon.jvmargs=-Xmx4g"
+          } >> ~/.gradle/gradle.properties
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Run checks
+        run: ./gradlew -PexcludeSamples=true check
+
+      - name: Publish test report
+        if: always()
+        continue-on-error: true
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: '**/build/test-results/**/TEST-*.xml'
+          check_name: Test results (Linux)
+          detailed_summary: true
+          include_passed: false
+          fail_on_failure: false
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-linux
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+          retention-days: 7
+
+  ci:
+    name: CI
+    if: always()
+    needs: [test-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required jobs succeeded
+        run: |
+          echo "test-linux: ${{ needs.test-linux.result }}"
+          [ "${{ needs.test-linux.result }}" = "success" ] || exit 1
