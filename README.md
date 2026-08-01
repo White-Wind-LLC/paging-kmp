@@ -334,7 +334,7 @@ val mapped: PagingData<String> = pagingData.map { user -> "${user.id}: ${user.na
 | **Android** | API 21+ |
 | **JVM** | Java 17+ |
 | **iOS** | iosX64, iosArm64, iosSimulatorArm64 |
-| **macOS** | macosX64, macosArm64 |
+| **macOS** | macosArm64 |
 | **Linux** | linuxX64, linuxArm64 |
 | **Windows** | mingwX64 |
 | **Web** | JavaScript (Node), WebAssembly (WasmJs) |
