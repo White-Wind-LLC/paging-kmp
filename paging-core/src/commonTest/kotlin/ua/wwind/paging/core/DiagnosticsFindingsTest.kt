@@ -83,13 +83,14 @@ class DiagnosticsFindingsTest {
     // ------------------------------------------------------------ F1 / F2 / F3
 
     /**
-     * F1: the 300 ms debounce is applied to the *initial* load as well, so first
-     *     paint costs 300 ms + one round trip even though nothing needs debouncing.
+     * F1 (fixed): the key debounce used to be applied to the *initial* load as well, so first paint
+     *     cost 300 ms + one round trip even though nothing needed debouncing. The first key emission
+     *     now bypasses the debounce, leaving only the round trip.
      * F2: chunks inside one loading pass are fetched strictly sequentially
      *     (maxInFlight == 1), so filling the preload window costs N round trips.
      */
     @Test
-    fun f1_f2_first_paint_is_debounced_and_fetches_are_serial() = runTest {
+    fun f1_f2_first_paint_is_not_debounced_but_fetches_are_serial() = runTest {
         val calls = Calls()
         val p = pager(calls, latencyMs = 100)
         var firstDataAt = -1L
@@ -98,8 +99,8 @@ class DiagnosticsFindingsTest {
         }
         testScheduler.advanceUntilIdle()
 
-        // 300 ms debounce + 100 ms network, for a load that had nothing to debounce.
-        firstDataAt shouldBe 400L
+        // 100 ms network only: the initial load had nothing to debounce.
+        firstDataAt shouldBe 100L
         calls.maxInFlight shouldBe 1
         job.cancel()
     }
@@ -191,13 +192,13 @@ class DiagnosticsFindingsTest {
     // ------------------------------------------------------------------- F5
 
     /**
-     * F5: `retry(key)` is routed through a StateFlow that is already holding
-     * `key`, so the documented recovery path (`retry(loadState.key)`, used by
-     * the README and by the sample's ErrorOverlay) is a no-op. Only retrying
-     * with a *different* key actually recovers.
+     * F5 (fixed): `retry(key)` used to be routed through the StateFlow that was already holding
+     * `key`, so the documented recovery path (`retry(loadState.key)`, used by the README and by the
+     * sample's ErrorOverlay) was a no-op and only a *different* key recovered. Retries now travel on
+     * their own channel and are always honoured.
      */
     @Test
-    fun f5_retry_with_the_failed_key_does_nothing() = runTest {
+    fun f5_retry_with_the_failed_key_reloads() = runTest {
         var failNext = true
         val attempts = mutableListOf<Int>()
         val p = Pager<Int>(20, 20, 100) { pos, size ->
@@ -220,11 +221,6 @@ class DiagnosticsFindingsTest {
         latest.retry(failedKey) // the documented call
         testScheduler.advanceUntilIdle()
 
-        attempts.size shouldBe before // nothing was retried
-        (latest.loadState is LoadState.Error) shouldBe true
-
-        latest.retry(failedKey + 1) // only a *different* key works
-        testScheduler.advanceUntilIdle()
         attempts.size shouldBe before + 1
         latest.loadState shouldBe LoadState.Success
         job.cancel()
@@ -233,14 +229,16 @@ class DiagnosticsFindingsTest {
     // ------------------------------------------------------------------- F6
 
     /**
-     * F6: `refresh()` clears the cache but does not re-trigger a load, and the
-     * conflating key StateFlow swallows the subsequent access to the same key.
-     * The list stays empty while reporting LoadState.Success.
+     * F6 (fixed): `refresh()` used to clear the cache without re-triggering a load, and the
+     * conflating key StateFlow swallowed the subsequent access to the same key, so the list stayed
+     * empty while reporting LoadState.Success. It now reloads the current window itself.
      */
     @Test
-    fun f6_refresh_empties_the_list_without_reloading() = runTest {
+    fun f6_refresh_reloads_the_current_window() = runTest {
+        var portions = 0
         val p = Pager<String>(20, 20, 100) { pos, size ->
             flow {
+                portions++
                 delay(50)
                 emit(DataPortion(1_000, (pos..pos + size - 1).associateWith { "v$it" }.toPersistentMap()))
             }
@@ -249,15 +247,14 @@ class DiagnosticsFindingsTest {
         val job = launch { p.flow.collectLatest { latest = it } }
         testScheduler.advanceUntilIdle()
         checkNotNull(latest).data.values.size shouldBe 20
+        val before = portions
 
         p.refresh()
         testScheduler.advanceUntilIdle()
-        latest.data.values.size shouldBe 0
-        latest.loadState shouldBe LoadState.Success // "success", but empty
 
-        latest.data[0] // re-access same key
-        testScheduler.advanceUntilIdle()
-        latest.data.values.size shouldBe 0 // still empty
+        portions shouldBe before + 1 // the window was fetched again
+        latest.data.values.size shouldBe 20
+        latest.loadState shouldBe LoadState.Success
         job.cancel()
     }
 

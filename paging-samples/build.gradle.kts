@@ -20,7 +20,7 @@ kotlin {
     android(
         Action<KotlinMultiplatformAndroidLibraryTarget> {
             namespace = "ua.wwind.paging.sample"
-            compileSdk = 36
+            compileSdk = 37
             minSdk = 21
 
             // Required so Compose composeResources keep packaging into consumers' APKs (CMP-9547)

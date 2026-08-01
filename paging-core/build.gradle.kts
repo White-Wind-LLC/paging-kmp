@@ -25,7 +25,7 @@ kotlin {
     android(
         Action<KotlinMultiplatformAndroidLibraryTarget> {
             namespace = "ua.wwind.paging.core"
-            compileSdk = 36
+            compileSdk = 37
             minSdk = 21
 
             compilerOptions {

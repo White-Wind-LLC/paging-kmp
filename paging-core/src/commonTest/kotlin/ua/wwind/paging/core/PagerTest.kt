@@ -8,6 +8,7 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
@@ -136,8 +137,8 @@ class PagerTest {
         val errorState = afterError.loadState.shouldBeInstanceOf<LoadState.Error>()
         errorState.key shouldBe 200
 
-        // Retry via PagingData.retry; use a nearby key to bypass distinctUntilChanged
-        afterError.retry(201)
+        // Retry via PagingData.retry with the key the error reported - the documented recovery path
+        afterError.retry(errorState.key)
         advanceFully(0)
 
         val afterRetry = checkNotNull(latest)
@@ -147,6 +148,147 @@ class PagerTest {
         entry.value shouldBe 200
 
         job.cancel()
+    }
+
+    @Test
+    fun retry_reloads_without_waiting_for_the_key_debounce() = runTest {
+        val (pager, _) = buildPager(this, failingChunkStartOnce = 190)
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+
+        checkNotNull(latest).data[200]
+        this.testScheduler.advanceTimeBy(300)
+        this.testScheduler.advanceUntilIdle()
+        latest.loadState.shouldBeInstanceOf<LoadState.Error>()
+
+        val retriedAt = this.testScheduler.currentTime
+        latest.retry(200)
+        this.testScheduler.runCurrent()
+
+        // The reload is scheduled straight away rather than after another debounce window
+        latest.loadState.shouldBeInstanceOf<LoadState.Success>()
+        this.testScheduler.currentTime shouldBe retriedAt
+        latest.data[200].shouldBeInstanceOf<EntryState.Success<Int>>()
+
+        job.cancel()
+    }
+
+    @Test
+    fun refresh_reloads_the_window_around_the_last_accessed_key() = runTest {
+        val starts = mutableListOf<Int>()
+        val pager = Pager<Int>(loadSize = 20, preloadSize = 20, cacheSize = 100) { pos, size ->
+            flow {
+                starts += pos
+                val values: Map<Int, Int> = (pos..<pos + size).associateWith { it }
+                emit(DataPortion(totalSize = 1_000, values = values.toPersistentMap()))
+            }
+        }
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+
+        checkNotNull(latest).data[500]
+        this.testScheduler.advanceTimeBy(300)
+        this.testScheduler.advanceUntilIdle()
+        starts.clear()
+
+        pager.refresh()
+        this.testScheduler.advanceUntilIdle()
+
+        // Reloaded around 500 - the position the user is actually looking at - not around 0
+        starts.isEmpty() shouldBe false
+        starts.all { it in 400..600 } shouldBe true
+        latest.data[500].shouldBeInstanceOf<EntryState.Success<Int>>()
+        latest.loadState.shouldBeInstanceOf<LoadState.Success>()
+
+        job.cancel()
+    }
+
+    @Test
+    fun refresh_does_not_let_an_in_flight_load_restore_cleared_values() = runTest {
+        var epoch = 0
+        val pager = Pager<String>(loadSize = 20, preloadSize = 20, cacheSize = 100) { pos, size ->
+            flow {
+                val fetchedIn = epoch
+                delay(50)
+                val values: Map<Int, String> = (pos..<pos + size).associateWith { "e$fetchedIn-$it" }
+                emit(DataPortion(totalSize = 1_000, values = values.toPersistentMap()))
+            }
+        }
+
+        var latest: PagingData<String>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+
+        checkNotNull(latest).data[500]
+        this.testScheduler.advanceTimeBy(300) // debounce elapsed, first chunk now in flight
+        this.testScheduler.advanceTimeBy(25)
+
+        epoch = 1
+        pager.refresh()
+        this.testScheduler.advanceUntilIdle()
+
+        val values = latest.data.values.values
+        values.isEmpty() shouldBe false
+        values.none { it.startsWith("e0-") } shouldBe true
+
+        job.cancel()
+    }
+
+    @Test
+    fun initial_load_is_not_debounced() = runTest {
+        val startedAt = mutableListOf<Long>()
+        val pager = Pager<Int>(loadSize = 20, preloadSize = 20, cacheSize = 100) { pos, size ->
+            flow {
+                startedAt += this@runTest.testScheduler.currentTime
+                val values: Map<Int, Int> = (pos..<pos + size).associateWith { it }
+                emit(DataPortion(totalSize = 1_000, values = values.toPersistentMap()))
+            }
+        }
+
+        val job: Job = launch { pager.flow.collectLatest { } }
+        this.testScheduler.advanceUntilIdle()
+
+        startedAt shouldBe listOf(0L)
+
+        job.cancel()
+    }
+
+    @Test
+    fun key_debounce_is_configurable() = runTest {
+        val startedAt = mutableListOf<Long>()
+        val pager = Pager<Int>(loadSize = 20, preloadSize = 20, cacheSize = 100, keyDebounceMs = 0) { pos, size ->
+            flow {
+                startedAt += this@runTest.testScheduler.currentTime
+                delay(100)
+                val values: Map<Int, Int> = (pos..<pos + size).associateWith { it }
+                emit(DataPortion(totalSize = 1_000, values = values.toPersistentMap()))
+            }
+        }
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+        startedAt.clear()
+        val jumpedAt = this.testScheduler.currentTime
+
+        checkNotNull(latest).data[500]
+        this.testScheduler.advanceUntilIdle()
+
+        // With the debounce switched off the jump is served immediately
+        startedAt.first() shouldBe jumpedAt
+
+        job.cancel()
+    }
+
+    @Test
+    fun rejects_a_negative_key_debounce() {
+        shouldThrow<IllegalArgumentException> {
+            Pager<Int>(keyDebounceMs = -1) { _, _ -> emptyFlow() }
+        }
     }
 
     @Test
