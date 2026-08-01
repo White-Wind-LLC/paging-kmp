@@ -1,11 +1,15 @@
 package ua.wwind.paging.core
 
+import io.kotest.assertions.throwables.shouldNotThrowAny
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -86,7 +90,7 @@ class PagerTest {
 
     @Test
     fun moving_far_evicts_outside_cache_range() = runTest {
-        val cacheSize = 40
+        val cacheSize = 60
         val preloadSize = 60
         val (pager, advanceFully) = buildPager(this, cacheSize = cacheSize, preloadSize = preloadSize)
 
@@ -174,5 +178,30 @@ class PagerTest {
         latest.data[4].shouldBeInstanceOf<EntryState.Success<Int>>()
 
         job.cancel()
+    }
+
+    @Test
+    fun rejects_a_cache_narrower_than_the_preload_window() {
+        val error = shouldThrow<IllegalArgumentException> {
+            Pager<Int>(loadSize = 20, preloadSize = 100, cacheSize = 40) { _, _ -> emptyFlow() }
+        }
+
+        val message = error.message.orEmpty()
+        message shouldContain "cacheSize (40)"
+        message shouldContain "preloadSize (100)"
+    }
+
+    @Test
+    fun accepts_a_cache_exactly_as_wide_as_the_preload_window() {
+        shouldNotThrowAny {
+            Pager<Int>(loadSize = 20, preloadSize = 100, cacheSize = 100) { _, _ -> emptyFlow() }
+        }
+    }
+
+    @Test
+    fun rejects_a_non_positive_load_size() {
+        shouldThrow<IllegalArgumentException> {
+            Pager<Int>(loadSize = 0) { _, _ -> emptyFlow() }
+        }
     }
 }

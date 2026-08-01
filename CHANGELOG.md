@@ -6,10 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `Pager`, `StreamingPagerConfig` and `PagingMediatorConfig` now reject a cache narrower than the preload window
+  (`cacheSize >= preloadSize`, `cacheSize >= prefetchSize` for the mediator) with an `IllegalArgumentException` at
+  construction time. Such a configuration used to be accepted silently while the pager streamed a window it could not
+  retain — measured at ~76% of the payload discarded on arrival, with the streams that produced it left open (#13).
+  `Pager` also validates `loadSize > 0` and `preloadSize >= 0`, which it did not check at all before.
+- `StreamingPagerConfig` validates itself in its own `init` instead of in `StreamingPager`, so `copy()` is covered too.
 - Bumped library versions: Kotlin to 2.4.10, kotlinx-coroutines to 1.11.0, Compose Multiplatform to 1.11.1,
   `androidx-activity-compose` to 1.13.0, and `kotlinx-collections-immutable` to 0.5.1.
 - `paging-samples` no longer builds the `iosX64` target — Compose Multiplatform 1.11 stopped publishing artifacts for
   it. The published `paging-core` library keeps `iosX64` and its full target set unchanged.
+
+### Documentation
+
+- Clarified that `preloadSize`/`prefetchSize` and `cacheSize` are radii in indices around the current position, not
+  item counts — `Pager`'s KDoc previously described `cacheSize` as the "maximum number of items to keep in memory",
+  while the cache actually holds up to `2 * cacheSize` items. The invariant is now stated in the KDoc of all three
+  configurations and in `README.md`.
 
 ### Fixed
 

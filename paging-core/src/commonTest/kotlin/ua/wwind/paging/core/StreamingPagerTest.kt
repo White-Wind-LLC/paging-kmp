@@ -1,7 +1,10 @@
 package ua.wwind.paging.core
 
+import io.kotest.assertions.throwables.shouldNotThrowAny
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -366,5 +369,32 @@ class StreamingPagerTest {
         latest.data.size shouldBe 10
 
         job.cancel()
+    }
+
+    @Test
+    fun config_rejects_a_cache_narrower_than_the_preload_window() {
+        val error = shouldThrow<IllegalArgumentException> {
+            StreamingPagerConfig(loadSize = 20, preloadSize = 100, cacheSize = 40)
+        }
+
+        val message = error.message.orEmpty()
+        message shouldContain "cacheSize (40)"
+        message shouldContain "preloadSize (100)"
+    }
+
+    @Test
+    fun config_accepts_a_cache_exactly_as_wide_as_the_preload_window() {
+        shouldNotThrowAny {
+            StreamingPagerConfig(loadSize = 20, preloadSize = 100, cacheSize = 100)
+        }
+    }
+
+    @Test
+    fun config_rejects_a_copy_that_breaks_the_cache_invariant() {
+        val valid = StreamingPagerConfig(loadSize = 20, preloadSize = 100, cacheSize = 120)
+
+        shouldThrow<IllegalArgumentException> {
+            valid.copy(cacheSize = 40)
+        }
     }
 }

@@ -83,8 +83,8 @@ data class User(val id: Int, val name: String, val email: String)
 
 val pager = Pager<User>(
     loadSize = 20,      // items fetched per request
-    preloadSize = 60,   // items kept warm around the current position
-    cacheSize = 100,    // max items retained in memory
+    preloadSize = 60,   // preload radius around the current position
+    cacheSize = 100,    // cache radius around the current position — must be >= preloadSize
     readData = { position, loadSize ->
         flow {
             val users = repository.getUsers(position, loadSize)
@@ -194,6 +194,12 @@ It then:
 - Aggregates per-window `LoadState` (priority: `Loading > Error > Success`) and **survives `readTotal` failures**,
   recovering on `retry`.
 
+> **`preloadSize` and `cacheSize` are radii, not totals.** Both are measured in indices from the last accessed
+> position, so a cache of `100` holds roughly `200` items. `cacheSize` must be `>= preloadSize` — otherwise the pager
+> would stream a window it cannot retain and throw most of it away on arrival; such a configuration is rejected at
+> construction time. For `StreamingPager`, whose chunk grid is aligned to `loadSize` and therefore reaches slightly
+> past the preload radius, `cacheSize >= preloadSize + loadSize` retains that overshoot too.
+
 Perfect for **live dashboards, trading/price tables, chat & activity feeds, collaborative lists, and order/inventory
 boards** — anywhere the data changes while the user is looking at it.
 
@@ -292,8 +298,8 @@ val mediator = PagingMediator(
     remote = UserRemoteDataSource(api),
     config = PagingMediatorConfig(
         loadSize = 20,                  // items per page
-        prefetchSize = 60,              // items preloaded around the current position
-        cacheSize = 100,                // max items kept in memory
+        prefetchSize = 60,              // prefetch radius around the current position
+        cacheSize = 100,                // cache radius — must be >= prefetchSize
         concurrency = 2,                // concurrent remote fetches
         isRecordStale = { false },      // decide if a cached record must be refreshed
         fetchFullRangeOnMiss = false,   // refetch the full window on miss/inconsistency

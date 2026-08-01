@@ -1,5 +1,6 @@
 package ua.wwind.paging.core
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import kotlinx.collections.immutable.PersistentMap
 import kotlinx.collections.immutable.toPersistentMap
@@ -324,26 +325,44 @@ class DiagnosticsFindingsTest {
     // ------------------------------------------------------------------- F8
 
     /**
-     * F8: nothing validates cacheSize against preloadSize. With cacheSize <
-     * preloadSize the pager keeps streams open for ranges whose payload is
-     * dropped by `onPortion`'s cacheRange filter the moment it arrives.
+     * F8 (fixed): nothing used to validate `cacheSize` against `preloadSize`. With
+     * `cacheSize < preloadSize` the pager kept streams open for ranges whose payload was dropped by
+     * `onPortion`'s cacheRange filter the moment it arrived - 340 items over the wire for 81
+     * retained on a jump to position 500, ~76% discarded, with 11 streams left open pushing data
+     * that went straight into the bin.
+     *
+     * Such a configuration is now rejected at construction time.
      */
     @Test
-    fun f8_cache_smaller_than_preload_streams_data_that_is_discarded() = runTest {
+    fun f8_cache_smaller_than_preload_is_rejected() {
+        shouldThrow<IllegalArgumentException> {
+            ua.wwind.paging.core.stream.StreamingPagerConfig(20, 100, 40)
+        }
+    }
+
+    /**
+     * F8 (cont.): with the invariant satisfied, everything the viewport streams is also retained -
+     * the payload of the streams opened for the jump survives `onPortion` in full.
+     *
+     * Only the portions streamed *after* the jump are counted: the initial load around position 0
+     * is legitimately evicted once the viewport moves 500 items away from it.
+     */
+    @Test
+    fun f8b_a_valid_cache_retains_everything_the_viewport_streams() = runTest {
         val s = FakeStream(1_000)
-        val p = streamingPager(s, ua.wwind.paging.core.stream.StreamingPagerConfig(20, 100, 40))
+        val p = streamingPager(s, ua.wwind.paging.core.stream.StreamingPagerConfig(20, 100, 120))
         var latest: PagingData<String>? = null
         val job = launch { p.flow.collectLatest { latest = it } }
         testScheduler.advanceUntilIdle()
+
+        val openedBeforeJump = s.portionOpens.size
         latest!!.data[500]
         testScheduler.advanceUntilIdle()
 
-        val fetched = s.portionOpens.sumOf { it.second }
+        val streamedForViewport = s.portionOpens.drop(openedBeforeJump).sumOf { it.second }
         val retained = latest!!.data.values.size
-        fetched shouldBe 340
-        retained shouldBe 81
-        // ~76% of everything pulled over the wire is thrown away on arrival
-        (retained.toDouble() / fetched < 0.25) shouldBe true
+        streamedForViewport shouldBe 220
+        retained shouldBe streamedForViewport
         job.cancel()
     }
 

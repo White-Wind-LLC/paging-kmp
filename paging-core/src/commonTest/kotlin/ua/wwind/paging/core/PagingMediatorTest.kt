@@ -1,6 +1,9 @@
 package ua.wwind.paging.core
 
+import io.kotest.assertions.throwables.shouldNotThrowAny
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -313,5 +316,23 @@ class PagingMediatorTest {
         (0..19).forEach { pos -> after.data[pos].shouldBeInstanceOf<EntryState.Success<Item>>() }
 
         job.cancel()
+    }
+
+    @Test
+    fun config_rejects_a_cache_narrower_than_the_prefetch_window() {
+        val error = shouldThrow<IllegalArgumentException> {
+            PagingMediatorConfig<Item>(loadSize = 20, prefetchSize = 100, cacheSize = 40)
+        }
+
+        val message = error.message.orEmpty()
+        message shouldContain "cacheSize (40)"
+        message shouldContain "prefetchSize (100)"
+    }
+
+    @Test
+    fun config_accepts_a_cache_exactly_as_wide_as_the_prefetch_window() {
+        shouldNotThrowAny {
+            PagingMediatorConfig<Item>(loadSize = 20, prefetchSize = 100, cacheSize = 100)
+        }
     }
 }

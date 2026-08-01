@@ -259,9 +259,14 @@ private fun computeMissingRanges(expected: IntRange, presentKeys: Set<Int>): Lis
 /**
  * Configuration for [PagingMediator] behavior. All parameters have sensible defaults.
  *
+ * [prefetchSize] and [cacheSize] are both radii in indices around the current position, and
+ * `cacheSize >= prefetchSize` is required: a cache narrower than the prefetch window would discard
+ * most of every portion the moment it arrives.
+ *
  * - [loadSize]: Number of items the pager requests per load.
- * - [prefetchSize]: Number of items to prefetch ahead of the viewport.
- * - [cacheSize]: Maximum number of items retained by the pager window.
+ * - [prefetchSize]: Prefetch radius in indices around the current position, in both directions.
+ * - [cacheSize]: Cache radius in indices around the current position; items outside are evicted, so
+ *   the cache holds up to `2 * cacheSize` items. Must be `>= prefetchSize`.
  * - [isRecordStale]: Predicate used to filter out stale records from local before emission.
  * - [concurrency]: Maximum number of concurrent remote fetches.
  * - [fetchFullRangeOnMiss]: If true, fetch the full requested range when any position is missing.
@@ -277,4 +282,12 @@ public data class PagingMediatorConfig<T>(
     val fetchFullRangeOnMiss: Boolean = false,
     val emitOutdatedRecords: Boolean = false,
     val emitIntermediateResults: Boolean = true,
-)
+) {
+    init {
+        require(loadSize > 0) { "loadSize must be > 0" }
+        require(prefetchSize >= 0) { "prefetchSize must be >= 0" }
+        require(cacheSize >= prefetchSize) {
+            cacheRadiusTooSmallMessage(cacheSize, preloadName = "prefetchSize", preloadSize = prefetchSize)
+        }
+    }
+}
