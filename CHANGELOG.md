@@ -6,12 +6,21 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking Changes
 
+- `Pager` gained a `keyDebounceMs` parameter between `cacheSize` and `readData`. Named arguments and the trailing-lambda
+  form are unaffected; only calls that pass `readData` as the fourth *positional* argument need updating.
 - Dropped the `macosX64` (Intel macOS) target from `paging-core`; the `paging-core-macosx64` artifact is no longer
   published. Kotlin 2.4 deprecates the target and will remove it in a future release, as Apple winds down x86_64
   support. `macosArm64` (Apple Silicon) is unaffected, as are `iosX64`, `linuxX64` and `mingwX64`.
 
+### Added
+
+- `Pager` takes a `keyDebounceMs` (default `300`), matching `StreamingPagerConfig.keyDebounceMs`. The delay was
+  hard-coded before, so a local or otherwise cheap source had no way to serve position changes sooner.
+
 ### Changed
 
+- `Pager` now drives every load - key access, retry and refresh - from a single collector, so the scheduling state
+  (in-flight job, planned range, last read key) is only ever touched from one coroutine.
 - `Pager`, `StreamingPagerConfig` and `PagingMediatorConfig` now reject a cache narrower than the preload window
   (`cacheSize >= preloadSize`, `cacheSize >= prefetchSize` for the mediator) with an `IllegalArgumentException` at
   construction time. Such a configuration used to be accepted silently while the pager streamed a window it could not
@@ -39,6 +48,17 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Pager: `PagingData.retry(key)` now actually retries. Retries used to be routed through the same conflating
+  `StateFlow` that already held the failed key, so the documented recovery path (`retry(loadState.key)`, used by the
+  README and by the sample's error overlay) emitted nothing and the pager stayed in `LoadState.Error` forever - only
+  retrying with a *different* key recovered. Retries travel on their own channel now and are never debounced (#3).
+- Pager: `refresh()` reloads instead of just emptying the list. It used to clear the cache and rely on the UI touching
+  an item again, which the conflating key trigger then swallowed, leaving the list empty while reporting
+  `LoadState.Success`. `refresh()` now cancels and awaits the in-flight load - which held a pre-refresh cache snapshot
+  and could write cleared items back - clears the cache, and reloads the window around the position last accessed (#4).
+- Pager: the initial load is no longer debounced. `keyTrigger` starts at `0`, so the first load waited out the full
+  300 ms debounce despite having nothing to debounce - 75% of a 400 ms first paint against a 100 ms backend. Only
+  subsequent position changes are debounced now (#7).
 - StreamingPager: the pager no longer reports `LoadState.Loading` forever after the total shrinks. The out-of-bounds
   key clamp and the stream close filter were both off by one, which produced an empty chunk that was marked as loading
   but never opened, so the marker was never cleared (#5).
@@ -49,6 +69,10 @@ All notable changes to this project will be documented in this file.
 
 - Added regression coverage for the shrink path in `StreamingPagerTest`, plus `WindowHelpersTest` pinning the invariant
   that the chunk planner never returns an empty range for an out-of-bounds key.
+- `PagerTest` covers retry with the failed key, retry without waiting for the debounce, refresh reloading the window
+  around the last accessed position, refresh racing an in-flight load, the undebounced initial load, and
+  `keyDebounceMs` validation and effect. The F1/F5/F6 characterisation tests in `DiagnosticsFindingsTest` were flipped
+  from documenting the defects to asserting the fixed behaviour.
 
 ## [2.2.7] - 2026-03-05
 

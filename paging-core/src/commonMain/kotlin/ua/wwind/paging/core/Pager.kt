@@ -6,15 +6,18 @@ import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -41,6 +44,9 @@ import kotlin.math.abs
  * (default: 60)
  * @param cacheSize Cache radius in indices around the current position; items outside are evicted,
  * so the cache holds up to `2 * cacheSize` items (default: 100). Must be `>= preloadSize`.
+ * @param keyDebounceMs Debounce delay applied to position changes before a load is scheduled
+ * (default: 300). The very first load bypasses it - there is nothing to debounce yet - as do
+ * [refresh] and `PagingData.retry`.
  * @param readData function to load data portions from the data source
  */
 @OptIn(FlowPreview::class)
@@ -48,6 +54,7 @@ public class Pager<T>(
     private val loadSize: Int = 20,
     private val preloadSize: Int = 60,
     private val cacheSize: Int = 100,
+    private val keyDebounceMs: Long = 300,
     private val readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>,
 ) {
     init {
@@ -56,12 +63,18 @@ public class Pager<T>(
         require(cacheSize >= preloadSize) {
             cacheRadiusTooSmallMessage(cacheSize, preloadName = "preloadSize", preloadSize = preloadSize)
         }
+        require(keyDebounceMs >= 0) { "keyDebounceMs must be >= 0" }
     }
 
     // External refresh trigger (fan-out to active collections)
     private val refreshRequests: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 64)
 
     private enum class Direction { Increase, Decrease }
+
+    /** What made the pipeline schedule a load; decides how the in-flight load is treated. */
+    private enum class Reason { Access, Retry, Refresh }
+
+    private data class LoadRequest(val key: Int, val reason: Reason)
 
     /**
      * Public flow that combines data and load state into PagingData, with internal lifecycle-bound jobs.
@@ -70,9 +83,19 @@ public class Pager<T>(
         // Debounced trigger for the last accessed key only
         val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(0)
 
-        // Retry and onGet entry access
+        // Retries travel on their own channel: keyTrigger already holds the key that failed, and a
+        // StateFlow conflates equal values, so routing a retry through it would emit nothing.
+        val retryRequests: MutableSharedFlow<Int> = MutableSharedFlow(extraBufferCapacity = 64)
+
+        // Entry access
         fun onGet(key: Int) {
             keyTrigger.update { key }
+        }
+
+        // PagingData.retry: keep the tracked position in sync, then force a load for it
+        fun onRetry(key: Int) {
+            keyTrigger.update { key }
+            retryRequests.tryEmit(key)
         }
 
         // Reactive storage for paged data
@@ -95,69 +118,96 @@ public class Pager<T>(
         // Combine and emit data
         val emitter = launch {
             combine(data, loadState.onStart { emit(LoadState.Success) }) { data, loadState ->
-                PagingData(data, loadState, ::onGet)
+                PagingData(data, loadState, ::onRetry)
             }.collect { paging -> send(paging) }
         }
 
-        // Handle refresh requests from outside
-        val refreshJob = launch {
-            refreshRequests.collectLatest {
-                data.update { it.copy(values = persistentMapOf()) }
-            }
-        }
+        // Position changes are debounced, except for the very first one: at that point there is no
+        // scroll to settle, so waiting only delays the first paint. `onEach` runs in the debounce
+        // operator's own coroutine, so the flag is always set before the next timeout is computed.
+        var debounceKeys = false
+        val accessRequests: Flow<LoadRequest> = keyTrigger
+            .debounce { if (debounceKeys) keyDebounceMs else 0L }
+            .onEach { debounceKeys = true }
+            .distinctUntilChanged()
+            .map { key -> LoadRequest(key, Reason.Access) }
 
-        // Set up debounced loading pipeline bound to this collection
+        // One collector drives every load, so the scheduling state above is touched from a single
+        // coroutine and a refresh can never interleave with the key pipeline.
         val keysJob = launch {
-            keyTrigger
-                .debounce(300)
-                .distinctUntilChanged()
-                .collect { key ->
-                    if (key < 0) return@collect
-                    val direction =
-                        if (lastReadKey >= 0 && key < lastReadKey) Direction.Increase else Direction.Decrease
+            merge(
+                accessRequests,
+                retryRequests.map { key -> LoadRequest(key, Reason.Retry) },
+                refreshRequests.map { LoadRequest(keyTrigger.value, Reason.Refresh) },
+            ).collect { request ->
+                val key = request.key
+                if (key < 0) return@collect
 
-                    val plannedRange = computeFetchFullRangeForKey(data.value, key)
-
-                    val activeJob = currentLoadJob
-                    if (activeJob?.isActive == true && currentLoadingRange?.contains(key) == true) {
-                        return@collect
+                when (request.reason) {
+                    Reason.Refresh -> {
+                        // Await the cancellation: the in-flight load merges from a pre-refresh
+                        // cache snapshot and would otherwise write the cleared entries back.
+                        currentLoadJob?.cancelAndJoin()
+                        currentLoadJob = null
+                        currentLoadingRange = null
+                        data.update { it.copy(values = persistentMapOf()) }
+                        lastReadKey = -1
                     }
 
-                    if (activeJob?.isActive == true && (currentLoadingRange?.contains(key) != true)) {
-                        activeJob.cancel(CancellationException("Pager: superseded by new key $key"))
+                    Reason.Retry -> {
+                        currentLoadJob?.cancel(CancellationException("Pager: superseded by retry for key $key"))
+                        currentLoadJob = null
+                        currentLoadingRange = null
                     }
 
-                    currentLoadingRange = plannedRange
-                    val job = launch {
-                        loadPortion(
-                            dataFlow = data,
-                            loadStateFlow = loadState,
-                            mutex = mutex,
-                            key = key,
-                            primaryDirection = direction,
-                            onGet = ::onGet,
-                        )
-                    }
-                    currentLoadJob = job
-                    job.invokeOnCompletion {
-                        if (currentLoadJob === job) {
-                            currentLoadJob = null
-                            currentLoadingRange = null
+                    Reason.Access -> {
+                        val activeJob = currentLoadJob
+                        if (activeJob?.isActive == true) {
+                            if (currentLoadingRange?.contains(key) == true) return@collect
+                            activeJob.cancel(CancellationException("Pager: superseded by new key $key"))
                         }
                     }
-
-                    lastReadKey = key
                 }
+
+                val direction =
+                    if (lastReadKey >= 0 && key < lastReadKey) Direction.Increase else Direction.Decrease
+
+                currentLoadingRange = computeFetchFullRangeForKey(data.value, key)
+                val job = launch {
+                    loadPortion(
+                        dataFlow = data,
+                        loadStateFlow = loadState,
+                        mutex = mutex,
+                        key = key,
+                        primaryDirection = direction,
+                        onGet = ::onGet,
+                    )
+                }
+                currentLoadJob = job
+                job.invokeOnCompletion {
+                    if (currentLoadJob === job) {
+                        currentLoadJob = null
+                        currentLoadingRange = null
+                    }
+                }
+
+                lastReadKey = key
+            }
         }
 
         awaitClose {
             emitter.cancel()
-            refreshJob.cancel()
             keysJob.cancel()
             currentLoadJob?.cancel()
         }
     }
 
+    /**
+     * Drops every cached item and reloads the window around the last accessed position.
+     *
+     * The in-flight load, if any, is cancelled first so that it cannot merge its pre-refresh
+     * snapshot back over the cleared cache.
+     */
     public fun refresh() {
         refreshRequests.tryEmit(Unit)
     }

@@ -82,9 +82,10 @@ Prerequisites: Kotlin `2.4.10+`, `kotlinx-collections-immutable` `0.5.1+`, and t
 data class User(val id: Int, val name: String, val email: String)
 
 val pager = Pager<User>(
-    loadSize = 20,      // items fetched per request
-    preloadSize = 60,   // preload radius around the current position
-    cacheSize = 100,    // cache radius around the current position — must be >= preloadSize
+    loadSize = 20,        // items fetched per request
+    preloadSize = 60,     // preload radius around the current position
+    cacheSize = 100,      // cache radius around the current position — must be >= preloadSize
+    keyDebounceMs = 300,  // settle time for scrolling; the first load is never debounced
     readData = { position, loadSize ->
         flow {
             val users = repository.getUsers(position, loadSize)
@@ -139,6 +140,23 @@ query/filter). This is what enables random access, jump-to-index, and accurate s
 | `LoadState` | Global state: `Loading` · `Success` · `Error(throwable, key)`. |
 | `EntryState<T>` | Per-item state: `Loading` or `Success(value)`. Use `getOrNull()` for a quick value-or-null read. |
 | `DataPortion<T>` | The contract returned by your data source: `totalSize` + a `PersistentMap<Int, T>` of loaded values. |
+
+### Retry and refresh
+
+Both bypass the key debounce and reload immediately:
+
+- **`pagingData.retry(key)`** — re-runs the load that failed. Passing the key the error reported
+  (`retry(loadState.key)`) is the intended call; the ranges that are still missing around it are fetched again, and
+  everything already cached is kept.
+- **`pager.refresh()`** — drops the cache and reloads the window around the position last accessed, cancelling the
+  in-flight load first so it cannot write stale items back. Use it when the underlying dataset changed as a whole
+  (a filter changed, a pull-to-refresh, a sign-in).
+
+### Debouncing
+
+Position changes are debounced by `keyDebounceMs` (300 ms by default) so that fast scrolling does not issue a request
+per row. Two cases skip it: the **initial load**, which has no scroll to settle, and explicit `retry` / `refresh`
+calls. Set `keyDebounceMs = 0` if your source is local and cheap enough to serve every position change.
 
 ## Compose Integration
 
