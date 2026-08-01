@@ -1,0 +1,11 @@
+# Deviations from detekt's default configuration.
+# The build sets buildUponDefaultConfig = true, so this file must contain ONLY
+# what we intentionally change. Never paste the full default config here.
+#
+# Two kinds of entries are allowed:
+#   1. A disabled or relaxed rule — always with a comment explaining why.
+#   2. Test-path exclusions — KMP source sets are named commonTest/jvmTest/…,
+#      so detekt's built-in `**/test/**` patterns do not match them.
+
+config:
+  validation: true

@@ -17,6 +17,49 @@ permissions:
   pull-requests: write
 
 jobs:
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Tune Gradle memory for CI runner
+        run: |
+          mkdir -p ~/.gradle
+          {
+            echo "org.gradle.jvmargs=-Xmx4g"
+            echo "kotlin.daemon.jvmargs=-Xmx4g"
+          } >> ~/.gradle/gradle.properties
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # No ~/.konan cache: the standalone detekt task does not compile anything, so the
+      # Kotlin/Native toolchain is never downloaded. That is what keeps this job fast enough
+      # to report formatting problems long before the test jobs finish.
+      # Runs without -PexcludeSamples on purpose: paging-samples is our code too.
+      - name: Run Spotless and detekt
+        run: ./gradlew spotlessCheck detekt
+
+      - name: Upload analysis reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-analysis-reports
+          path: '**/build/reports/detekt/**'
+          retention-days: 7
+
   test-linux:
     name: Test (Linux)
     runs-on: ubuntu-latest
@@ -63,8 +106,13 @@ jobs:
 
       # Lockfiles are already verified above; with -PexcludeSamples the generated lock is a
       # subset of the committed one, so the store tasks would always report a false mismatch.
+      # spotlessCheck and detekt are excluded here: the dedicated static-analysis job already
+      # runs them, on the full project including paging-samples.
       - name: Run checks
-        run: ./gradlew -PexcludeSamples=true check -x kotlinStoreYarnLock -x kotlinWasmStoreYarnLock
+        run: >-
+          ./gradlew -PexcludeSamples=true check
+          -x kotlinStoreYarnLock -x kotlinWasmStoreYarnLock
+          -x spotlessCheck -x detekt
 
       - name: Publish test report
         if: always()
@@ -158,12 +206,14 @@ jobs:
   ci:
     name: CI
     if: always()
-    needs: [test-linux, test-apple]
+    needs: [static-analysis, test-linux, test-apple]
     runs-on: ubuntu-latest
     steps:
       - name: Verify required jobs succeeded
         run: |
+          echo "static-analysis: ${{ needs.static-analysis.result }}"
           echo "test-linux: ${{ needs.test-linux.result }}"
           echo "test-apple: ${{ needs.test-apple.result }}"
+          [ "${{ needs.static-analysis.result }}" = "success" ] || exit 1
           [ "${{ needs.test-linux.result }}" = "success" ] || exit 1
           [ "${{ needs.test-apple.result }}" = "success" ] || exit 1
