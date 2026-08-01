@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/White-Wind-LLC/paging-kmp/actions/workflows/ci.yml/badge.svg)](https://github.com/White-Wind-LLC/paging-kmp/actions/workflows/ci.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/ua.wwind.paging/paging-core?label=Maven%20Central&color=blue)](https://central.sonatype.com/artifact/ua.wwind.paging/paging-core)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.3.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 [![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/docs/multiplatform.html)
 
@@ -70,11 +70,11 @@ Available on **Maven Central**.
 // build.gradle.kts
 dependencies {
     implementation("ua.wwind.paging:paging-core:2.2.7")
-    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.4.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.5.1")
 }
 ```
 
-Prerequisites: Kotlin `2.3.10+`, `kotlinx-collections-immutable` `0.4.0+`, and the `mavenCentral()` repository.
+Prerequisites: Kotlin `2.4.10+`, `kotlinx-collections-immutable` `0.5.1+`, and the `mavenCentral()` repository.
 
 ## Quick Start
 
