@@ -47,3 +47,5 @@ bin/
 .DS_Store
 
 /secrets/
+
+/docs/superpowers/plans/
