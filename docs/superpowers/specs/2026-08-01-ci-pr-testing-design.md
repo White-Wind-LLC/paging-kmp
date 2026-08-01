@@ -1,40 +1,40 @@
-# CI: тестування коду на пул-ріквестах
+# CI: testing code on pull requests
 
-**Дата:** 2026-08-01
-**Статус:** затверджено
+**Date:** 2026-08-01
+**Status:** approved
 
-## Проблема
+## Problem
 
-У репозиторії є єдиний workflow — `publish.yml`, який спрацьовує на теги `v*` і публікує
-`paging-core` у Maven Central. Пул-ріквести не перевіряються нічим: зламані тести або таргет, що
-не компілюється, виявляються лише під час публікації релізу.
+The repository has a single workflow — `publish.yml`, which triggers on `v*` tags and publishes
+`paging-core` to Maven Central. Pull requests are not checked at all: broken tests or a target
+that fails to compile are only discovered during release publication.
 
-## Мета
+## Goal
 
-Кожен PR у `main` автоматично запускає тести й перевіряє, що всі таргети `paging-core`
-компілюються. Результат — один статус-чек, придатний для branch protection.
+Every PR to `main` automatically runs the tests and verifies that all `paging-core` targets
+compile. The result is a single status check, suitable for branch protection.
 
-## Обсяг
+## Scope
 
-**Входить:**
+**In scope:**
 
-- Запуск тестів `commonTest` на JVM, Android, JS (Node), Wasm/JS (Node), linuxX64, macosArm64,
+- Running `commonTest` tests on JVM, Android, JS (Node), Wasm/JS (Node), linuxX64, macosArm64,
   iosSimulatorArm64.
-- Компіляція решти таргетів `paging-core`: linuxArm64, macosX64, iosX64, iosArm64.
-- Публікація звітів про тести: артефакти при падінні + зведення й анотації в PR.
+- Compiling the remaining `paging-core` targets: linuxArm64, macosX64, iosX64, iosArm64.
+- Publishing test reports: artifacts on failure + a summary and annotations on the PR.
 
-**Не входить:**
+**Out of scope:**
 
-- Збірка модуля `paging-samples` (виконується з `-PexcludeSamples=true`).
+- Building the `paging-samples` module (it is run with `-PexcludeSamples=true`).
 - `apiCheck` / binary-compatibility-validator.
-- Лінтери (ktlint, detekt), покриття коду.
-- Windows-раннер.
+- Linters (ktlint, detekt), code coverage.
+- Windows runner.
 
-## Архітектура
+## Architecture
 
-Новий файл `.github/workflows/ci.yml` з назвою `CI`, незалежний від `publish.yml`. Три джоби.
+A new file `.github/workflows/ci.yml` named `CI`, independent of `publish.yml`. Three jobs.
 
-### Тригери
+### Triggers
 
 ```yaml
 on:
@@ -49,116 +49,121 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 ```
 
-Прогони на `main` не переривати — скасування застарілих запусків діє лише для пул-ріквестів.
+Runs on `main` are not interrupted — cancellation of stale runs applies only to pull requests.
 
-### Джоб `test-linux` (`ubuntu-latest`)
+### Job `test-linux` (`ubuntu-latest`)
 
-Виконує два виклики Gradle: перевірку лок-файлів (див. «Yarn lockfile») і
+Runs two Gradle invocations: checking the lockfiles (see "Yarn lockfile") and
 `./gradlew -PexcludeSamples=true check -x kotlinStoreYarnLock -x kotlinWasmStoreYarnLock`.
-Другий покриває:
+The second covers:
 
-- `jvmTest`, `jsNodeTest`, `wasmJsNodeTest`, `linuxX64Test`, android unit-тести;
-- компіляцію та лінкування `linuxArm64` і `mingwX64`.
+- `jvmTest`, `jsNodeTest`, `wasmJsNodeTest`, `linuxX64Test`, Android unit tests;
+- compilation and linking of `linuxArm64` and `mingwX64`.
 
-Кроки:
+Steps:
 
 1. `actions/checkout@v4`
 2. `actions/setup-java@v4` — temurin, java 17
 3. `gradle/actions/wrapper-validation@v4`
 4. `gradle/actions/setup-gradle@v4`
-5. `actions/cache@v4` для `~/.konan`
+5. `actions/cache@v4` for `~/.konan`
 6. `chmod +x ./gradlew`
-7. запуск `check`
-8. звіти (див. нижче)
+7. run `check`
+8. reports (see below)
 
-### Джоб `test-apple` (`macos-latest`)
+### Job `test-apple` (`macos-latest`)
 
-Ті самі кроки підготовки, але замість `check` — явний список тасок:
+The same preparation steps, but instead of `check` — an explicit list of tasks:
 
-- тести: `:paging-core:macosArm64Test`, `:paging-core:iosSimulatorArm64Test`;
-- компіляція: `macosX64`, `iosX64`, `iosArm64` (`compileKotlin*` і `compileTestKotlin*`).
+- tests: `:paging-core:macosArm64Test`, `:paging-core:iosSimulatorArm64Test`;
+- compilation: `macosX64`, `iosX64`, `iosArm64` (`compileKotlin*` and `compileTestKotlin*`).
 
-`macosX64Test` не запускається: раннер `macos-latest` має arm64-архітектуру, і виконання
-x86-бінарників через Rosetta повільне та ненадійне. Таргет перевіряється компіляцією.
+`macosX64Test` is not run: the `macos-latest` runner has arm64 architecture, and running
+x86 binaries through Rosetta is slow and unreliable. The target is verified by compilation.
 
-Джоб не запускає jvm/js/wasm-тести — вони вже виконані на Linux, дублювати їх на дорожчому
-раннері немає сенсу.
+The job does not run jvm/js/wasm tests — they already ran on Linux, and duplicating them on a
+more expensive runner makes no sense.
 
-### Джоб `ci` (gate)
+### Job `ci` (gate)
 
 ```yaml
 needs: [test-linux, test-apple]
 if: always()
 ```
 
-Падає, якщо будь-який із залежних джобів не завершився успіхом. Дає один стабільний статус-чек
-`ci` для branch protection — при зміні набору джобів налаштування захисту гілки міняти не треба.
+Fails if any of the dependent jobs did not finish successfully. Provides a single stable status
+check `ci` for branch protection — when the set of jobs changes, the branch protection settings
+do not need to change.
 
-## Конфігурація Gradle в CI
+## Gradle configuration in CI
 
-`gradle.properties` не змінюємо — параметри перекриваються прапорцями командного рядка, щоб не
-псувати локальну розробку.
+`gradle.properties` is left unchanged — parameters are overridden via command-line flags, so as
+not to affect local development.
 
-**Памʼять.** Файл задає `org.gradle.jvmargs=-Xmx6G` і `kotlin.daemon.jvmargs=-Xmx6G`. Раннер
-`macos-latest` має ~7 GB RAM, чого для двох таких процесів не вистачає. У CI передаємо:
+**Memory.** The file sets `org.gradle.jvmargs=-Xmx6G` and `kotlin.daemon.jvmargs=-Xmx6G`. The
+`macos-latest` runner has ~7 GB of RAM, which is not enough for two such processes. In CI we
+pass:
 
 - ubuntu: `-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvmargs=-Xmx4g`
 - macOS: `-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvmargs=-Xmx3g`
 
-**Yarn lockfile.** `kotlin-js-store` закомічений у репозиторій. CI **не** запускає
-`kotlinUpgradeYarnLock` (на відміну від `publish.yml`): якщо лок розійшовся із залежностями,
-збірка падає, і автор PR оновлює лок сам. Це навмисна перевірка.
+**Yarn lockfile.** `kotlin-js-store` is committed to the repository. CI does **not** run
+`kotlinUpgradeYarnLock` (unlike `publish.yml`): if the lockfile has drifted from the
+dependencies, the build fails, and the PR author updates the lockfile themselves. This is an
+intentional check.
 
-Перевірка виконується окремим кроком **без** `-PexcludeSamples=true`:
+The check runs as a separate step **without** `-PexcludeSamples=true`:
 
 ```
 ./gradlew kotlinStoreYarnLock kotlinWasmStoreYarnLock
 ```
 
-Причина зʼясувалася на першому ж прогоні. Закомічені лок-файли описують граф залежностей із
-модулем `paging-samples`, а `-PexcludeSamples=true` дає його строгу підмножину — тому
-`kotlinStoreYarnLock` під цим прапорцем завжди повідомляв про розбіжність, незалежно від
-актуальності лока. Щоб зберегти і перевірку лока, і виключення семплів з важкої збірки, крок
-`check` виконується з `-x kotlinStoreYarnLock -x kotlinWasmStoreYarnLock`. Таск
-`kotlinRestoreYarnLock` при цьому лишається в графі, тож залежності в CI ставляться саме за
-закоміченим локом.
+The reason became clear on the very first run. The committed lockfiles describe the dependency
+graph including the `paging-samples` module, while `-PexcludeSamples=true` produces its strict
+subset — so `kotlinStoreYarnLock` under that flag always reported a mismatch, regardless of
+whether the lockfile was actually up to date. To keep both the lockfile check and the exclusion
+of samples from the heavy build, the `check` step runs with
+`-x kotlinStoreYarnLock -x kotlinWasmStoreYarnLock`. The `kotlinRestoreYarnLock` task stays in
+the graph, so dependencies in CI are resolved exactly against the committed lockfile.
 
-**Таймаут.** `timeout-minutes: 45` на кожен джоб із тестами.
+**Timeout.** `timeout-minutes: 45` for each job with tests.
 
-## Кешування
+## Caching
 
-- `gradle/actions/setup-gradle@v4` кешує Gradle-кеші. Поведінка за замовчуванням підходить:
-  кеш записується лише з дефолтної гілки, PR читають його.
-- `~/.konan` кешується окремим `actions/cache@v4` з ключем по хешу `gradle/libs.versions.toml`.
-  Без цього кожен джоб завантажує тулчейн Kotlin/Native заново.
+- `gradle/actions/setup-gradle@v4` caches the Gradle caches. The default behavior is suitable:
+  the cache is written only from the default branch, PRs read it.
+- `~/.konan` is cached separately via `actions/cache@v4` with a key based on the hash of
+  `gradle/libs.versions.toml`. Without this, each job would download the Kotlin/Native toolchain
+  again.
 
-## Звіти про тести
+## Test reports
 
-- `actions/upload-artifact@v4` з `if: failure()` — шляхи `**/build/reports/tests/**` та
-  `**/build/test-results/**`, retention 7 днів.
-- `mikepenz/action-junit-report@v5` з `if: always()` — парсить JUnit XML, пише зведення в
-  GitHub Job Summary і ставить анотації на рядках із впалими тестами в diff пул-ріквеста.
+- `actions/upload-artifact@v4` with `if: failure()` — paths `**/build/reports/tests/**` and
+  `**/build/test-results/**`, retention 7 days.
+- `mikepenz/action-junit-report@v5` with `if: always()` — parses JUnit XML, writes a summary to
+  the GitHub Job Summary, and adds annotations on the lines with failing tests in the pull
+  request's diff.
 
-Обидва кроки додаються в кожен із джобів `test-linux` та `test-apple`; імена артефактів
-розрізняються за джобом.
+Both steps are added to each of the `test-linux` and `test-apple` jobs; artifact names differ
+per job.
 
-## Відомі пробіли
+## Known gaps
 
-**`mingwX64`.** Перевірено на реальному прогоні: Linux-хост крос-компілює Windows-таргет
-повністю — виконуються `compileKotlinMingwX64`, `compileTestKotlinMingwX64` і навіть
-`linkDebugTestMingwX64`, тобто тестовий бінарник лінкується. Пропускається лише `mingwX64Test`
-(`SKIPPED`) — запуск тестів потребує Windows-хоста.
+**`mingwX64`.** Verified on a real run: the Linux host fully cross-compiles the Windows target —
+`compileKotlinMingwX64`, `compileTestKotlinMingwX64`, and even `linkDebugTestMingwX64` all run,
+meaning the test binary is linked. Only `mingwX64Test` is skipped (`SKIPPED`) — running the tests
+requires a Windows host.
 
-Отже пробіл вужчий, ніж очікувалося: для `mingwX64` не виконуються самі тести, тоді як
-компіляція й лінкування покриті джобом `test-linux`. Windows-раннер навмисно не додається
-(свідоме рішення щодо вартості та часу прогону). Рішення переглядається, якщо на цьому таргеті
-колись виявиться баг, який ловиться лише виконанням тестів.
+So the gap is narrower than expected: for `mingwX64`, only the test execution itself does not
+happen, while compilation and linking are covered by the `test-linux` job. A Windows runner is
+deliberately not added (a conscious decision about cost and run time). The decision will be
+revisited if a bug is ever found on this target that can only be caught by running the tests.
 
-## Ручні кроки після мерджу
+## Manual steps after merge
 
-У Settings → Branches для гілки `main` увімкнути required status check `ci`. Це не налаштовується
-файлами в репозиторії.
+In Settings → Branches for the `main` branch, enable the required status check `ci`. This is not
+configurable via files in the repository.
 
-## Документація
+## Documentation
 
-Додати бейдж статусу CI на початок `README.md`.
+Add a CI status badge to the top of `README.md`.
