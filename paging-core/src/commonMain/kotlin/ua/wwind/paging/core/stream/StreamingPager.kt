@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import ua.wwind.paging.core.BuildKonfig
 import ua.wwind.paging.core.ExperimentalStreamingPagerApi
+import ua.wwind.paging.core.LoadState
 import ua.wwind.paging.core.PagingData
 import ua.wwind.paging.core.PagingMap
 
@@ -114,14 +115,14 @@ public class StreamingPager<T>(
                             }
                         }
                     retryRequests.first()
-                    state.onTotalRetryStart()
+                    state.markKnownRanges { LoadState.Loading }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (t: Throwable) {
                     logger.e(t) { "readTotal: error" }
-                    state.onTotalError(t)
+                    state.markKnownRanges { range -> LoadState.Error(t, range.first) }
                     retryRequests.first()
-                    state.onTotalRetryStart()
+                    state.markKnownRanges { LoadState.Loading }
                 }
             }
         }
