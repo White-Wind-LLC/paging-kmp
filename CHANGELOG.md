@@ -6,8 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking Changes
 
-- `Pager` gained a `keyDebounceMs` parameter between `cacheSize` and `readData`. Named arguments and the trailing-lambda
-  form are unaffected; only calls that pass `readData` as the fourth *positional* argument need updating.
+- `Pager` gained `keyDebounceMs` and `concurrency` parameters between `cacheSize` and `readData`. Named arguments and
+  the trailing-lambda form are unaffected; only calls that pass `readData` as the fourth *positional* argument need
+  updating.
+- `Pager` now fetches up to `concurrency` (default `4`) chunks in parallel, so a source that must not be hit in
+  parallel has to opt out with `concurrency = 1`. `PagingMediator` is unaffected by the new default: it passes its own
+  `concurrency` (default `1`) down to the pager.
 - Dropped the `macosX64` (Intel macOS) target from `paging-core`; the `paging-core-macosx64` artifact is no longer
   published. Kotlin 2.4 deprecates the target and will remove it in a future release, as Apple winds down x86_64
   support. `macosArm64` (Apple Silicon) is unaffected, as are `iosX64`, `linuxX64` and `mingwX64`.
@@ -16,6 +20,10 @@ All notable changes to this project will be documented in this file.
 
 - `Pager` takes a `keyDebounceMs` (default `300`), matching `StreamingPagerConfig.keyDebounceMs`. The delay was
   hard-coded before, so a local or otherwise cheap source had no way to serve position changes sooner.
+- `Pager` takes a `concurrency` (default `4`): the number of chunks one loading pass keeps in flight (#8). Chunks used
+  to be fetched strictly one after another, so filling the preload window after a jump cost one round trip per chunk -
+  900 ms for a ±60 item window over a 100 ms backend, of which the chunk the user is actually looking at was only the
+  first 100 ms. It now costs `ceil(chunks / concurrency)` round trips (500 ms for the same jump, debounce included).
 
 ### Changed
 
@@ -28,6 +36,14 @@ All notable changes to this project will be documented in this file.
   items outside it.
 - `Pager` now drives every load - key access, retry and refresh - from a single collector, so the scheduling state
   (in-flight job, planned range, last read key) is only ever touched from one coroutine.
+- `Pager` prefetches the side the position is moving towards first (#8). The direction was computed and then discarded
+  by a distance sort spanning both sides of the key, so the window filled symmetrically (`490, 510, 480, 530, ...`) and
+  half the requests went to the side being scrolled away from before the leading side was covered. Each side is now
+  ordered nearest-first on its own, and `Direction` is named after what it actually does.
+- `Pager` no longer holds its mutex across the fetches, only across the cache transitions they produce, so a load can
+  no longer be blocked by the one it supersedes.
+- `PagingMediatorConfig.concurrency` now bounds the remote fetches of a whole pager rather than those of a single
+  `readData` call: the chunks of one loading pass and the missing sub-ranges within each of them draw from one budget.
 - `Pager`, `StreamingPagerConfig` and `PagingMediatorConfig` now reject a cache narrower than the preload window
   (`cacheSize >= preloadSize`, `cacheSize >= prefetchSize` for the mediator) with an `IllegalArgumentException` at
   construction time. Such a configuration used to be accepted silently while the pager streamed a window it could not
