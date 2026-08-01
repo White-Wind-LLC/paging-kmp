@@ -1,16 +1,38 @@
+import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
+import org.gradle.api.Action
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose)
-    alias(libs.plugins.android.library)
+    // AGP 9 removed Kotlin Multiplatform support from com.android.library; this is its
+    // multiplatform replacement, configured through the kotlin { android(...) } block below.
+    alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
 kotlin {
-    androidTarget()
+    // See paging-core/build.gradle.kts: the Action wrapper is what keeps this bound to AGP's
+    // "android" extension instead of KGP's deprecated android() target shortcut.
+    android(
+        Action<KotlinMultiplatformAndroidLibraryTarget> {
+            namespace = "ua.wwind.paging.sample"
+            compileSdk = 36
+            minSdk = 21
+
+            // Required so Compose composeResources keep packaging into consumers' APKs (CMP-9547)
+            androidResources {
+                enable = true
+            }
+
+            compilerOptions {
+                jvmTarget.set(JvmTarget.JVM_17)
+            }
+        },
+    )
 
     jvm()
 
@@ -68,17 +90,6 @@ kotlin {
             implementation(compose.desktop.currentOs)
         }
 
-    }
-}
-
-android {
-    namespace = "ua.wwind.paging.sample"
-    compileSdk = 35
-    defaultConfig {
-        minSdk = 21
-    }
-    publishing {
-        singleVariant("release")
     }
 }
 
