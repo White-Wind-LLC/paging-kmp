@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -84,7 +85,12 @@ public class StreamingPager<T>(
     private val readTotal: () -> Flow<Int>,
     private val readPortion: (pos: Int, loadSize: Int) -> Flow<Map<Int, T>>,
 ) {
-    /** Public flow of paging state for the UI. Jobs are bound to the collection lifecycle. */
+    /**
+     * Public flow of paging state for the UI. Jobs are bound to the collection lifecycle.
+     *
+     * The flow is conflated: `PagingData` is a complete snapshot of the list, so a collector that
+     * falls behind a live stream is handed the newest state rather than every state it missed.
+     */
     public val flow: Flow<PagingData<T>> = channelFlow {
 
         val logger = Logger(
@@ -155,5 +161,5 @@ public class StreamingPager<T>(
             keysJob.cancel()
             state.cancelActiveStreams()
         }
-    }
+    }.conflate()
 }

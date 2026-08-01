@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -95,6 +96,9 @@ public class Pager<T>(
 
     /**
      * Public flow that combines data and load state into PagingData, with internal lifecycle-bound jobs.
+     *
+     * The flow is conflated: `PagingData` is a complete snapshot of the list, so a collector that
+     * falls behind is handed the newest state rather than every state it missed.
      */
     public val flow: Flow<PagingData<T>> = channelFlow {
         // Debounced trigger for the last accessed key only
@@ -219,7 +223,7 @@ public class Pager<T>(
             keysJob.cancel()
             currentLoadJob?.cancel()
         }
-    }
+    }.conflate()
 
     /**
      * Drops every cached item and reloads the window around the last accessed position.

@@ -143,6 +143,14 @@ query/filter). This is what enables random access, jump-to-index, and accurate s
 | `EntryState<T>` | Per-item state: `Loading` or `Success(value)`. Use `getOrNull()` for a quick value-or-null read. |
 | `DataPortion<T>` | The contract returned by your data source: `totalSize` + a `PersistentMap<Int, T>` of loaded values. |
 
+### Snapshot delivery
+
+`PagingData` is a complete snapshot of the list, so only the newest one is ever worth rendering. Both pagers therefore
+expose a **conflated** `flow`: a collector that falls behind — a slow frame, or a live stream pushing faster than the UI
+draws — is handed the current state instead of a backlog of snapshots it would render and immediately discard. No data
+is lost this way, since every snapshot carries the whole window; only intermediate `LoadState` transitions can be
+skipped.
+
 ### Retry and refresh
 
 Both bypass the key debounce and reload immediately:
