@@ -56,8 +56,15 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      # Runs on the full project on purpose: the committed lockfiles describe the
+      # dependency graph with samples included, so verifying them requires the same graph.
+      - name: Verify yarn lockfiles
+        run: ./gradlew kotlinStoreYarnLock kotlinWasmStoreYarnLock
+
+      # Lockfiles are already verified above; with -PexcludeSamples the generated lock is a
+      # subset of the committed one, so the store tasks would always report a false mismatch.
       - name: Run checks
-        run: ./gradlew -PexcludeSamples=true check
+        run: ./gradlew -PexcludeSamples=true check -x kotlinStoreYarnLock -x kotlinWasmStoreYarnLock
 
       - name: Publish test report
         if: always()
