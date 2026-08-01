@@ -1,5 +1,6 @@
 # Paging KMP — Kotlin Multiplatform Paging Library
 
+[![CI](https://github.com/White-Wind-LLC/paging-kmp/actions/workflows/ci.yml/badge.svg)](https://github.com/White-Wind-LLC/paging-kmp/actions/workflows/ci.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/ua.wwind.paging/paging-core?label=Maven%20Central&color=blue)](https://central.sonatype.com/artifact/ua.wwind.paging/paging-core)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
