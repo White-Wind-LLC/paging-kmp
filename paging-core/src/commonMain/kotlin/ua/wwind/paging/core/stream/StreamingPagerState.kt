@@ -2,7 +2,6 @@ package ua.wwind.paging.core.stream
 
 import co.touchlab.kermit.Logger
 import kotlinx.collections.immutable.persistentMapOf
-import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -19,6 +18,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ua.wwind.paging.core.LoadState
 import ua.wwind.paging.core.PagingMap
+import ua.wwind.paging.core.mergeIntoCache
+import ua.wwind.paging.core.pruneToRange
 import kotlin.math.abs
 
 internal class StreamingPagerState<T>(
@@ -60,16 +61,32 @@ internal class StreamingPagerState<T>(
         toRemove.forEach { r -> activeStreams.remove(r) }
     }
 
+    /**
+     * Cache window the cached values were last constrained to.
+     *
+     * Everything in `data` is guaranteed to lie inside it: `onPortion` establishes the invariant and
+     * `onTotalChanged` only removes keys. While the viewport is stationary the window does not move,
+     * so incoming portions can skip the scan over the whole cache and write just their own delta.
+     */
+    private var prunedCacheRange: IntRange? = null
+
     suspend fun onPortion(values: Map<Int, T>) {
         mutex.withLock {
             val cacheRange = ((lastReadKey - config.cacheSize)..(lastReadKey + config.cacheSize))
+            val pruneExisting = prunedCacheRange != cacheRange
             data.update { current ->
-                PagingMap(
-                    size = current.size,
-                    values = (current.values + values).filterKeys { it in cacheRange }.toPersistentMap(),
-                    onGet = ::onGet
-                )
+                val merged = current.values.mergeIntoCache(values, cacheRange, pruneExisting)
+                if (merged === current.values) {
+                    current
+                } else {
+                    PagingMap(
+                        size = current.size,
+                        values = merged,
+                        onGet = ::onGet
+                    )
+                }
             }
+            prunedCacheRange = cacheRange
             null
         }
     }
@@ -120,7 +137,8 @@ internal class StreamingPagerState<T>(
         logger.d { "totalSize changed: ${current.size} -> $newTotal" }
 
         val newRange = 0..<newTotal.coerceAtLeast(1)
-        val prunedValues = current.values.filterKeys { it in newRange }.toPersistentMap()
+        // Only removes keys, so the `prunedCacheRange` invariant survives untouched.
+        val prunedValues = current.values.pruneToRange(newRange)
         data.update {
             PagingMap(
                 size = newTotal,

@@ -160,6 +160,46 @@ class StreamingPagerTest {
     }
 
     @Test
+    fun portion_after_the_viewport_moved_prunes_values_outside_the_new_cache_range() = runTest {
+        val src = TestSource<Int>()
+        src.totalFlow.value = 200
+        val (pager, advanceFully) = buildPager(
+            this,
+            config = StreamingPagerConfig(
+                loadSize = 5,
+                preloadSize = 5,
+                cacheSize = 10,
+                closeThreshold = 500,
+                keyDebounceMs = 0
+            ),
+            source = src,
+        )
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        advanceFully(50)
+
+        // Fill the cache around key 0
+        latest!!.data[0]
+        advanceFully(50)
+        src.emitPortion(0, 5, (0..4).associateWith { it })
+        advanceFully(10)
+        latest!!.data.values.keys.contains(0) shouldBe true
+
+        // Move the viewport far away: cacheRange becomes 90..110
+        latest!!.data[100]
+        advanceFully(50)
+        src.emitPortion(100, 5, (100..104).associateWith { it })
+        advanceFully(10)
+
+        // The incoming portion is cached, the values left behind by the old viewport are gone
+        latest!!.data.values.keys.contains(100) shouldBe true
+        latest!!.data.values.keys.none { it < 90 } shouldBe true
+
+        job.cancel()
+    }
+
+    @Test
     fun loadState_loading_then_success_when_new_range_opens() = runTest {
         val src = TestSource<Int>()
         src.totalFlow.value = 50
