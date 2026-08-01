@@ -13,7 +13,7 @@ All notable changes to this project will be documented in this file.
   `Pager` also validates `loadSize > 0` and `preloadSize >= 0`, which it did not check at all before.
 - `StreamingPagerConfig` validates itself in its own `init` instead of in `StreamingPager`, so `copy()` is covered too.
 - Bumped library versions: Kotlin to 2.4.10, kotlinx-coroutines to 1.11.0, Compose Multiplatform to 1.11.1,
-  `androidx-activity-compose` to 1.13.0, and `kotlinx-collections-immutable` to 0.5.1.
+  `androidx-activity-compose` to 1.13.0, `kotlinx-collections-immutable` to 0.5.1, and Kermit to 2.1.0.
 - `paging-samples` no longer builds the `iosX64` target — Compose Multiplatform 1.11 stopped publishing artifacts for
   it. The published `paging-core` library keeps `iosX64` and its full target set unchanged.
 
