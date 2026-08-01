@@ -30,6 +30,8 @@ import kotlin.math.abs
  *
  * The Pager implements intelligent preloading and memory management:
  * - Data is loaded in chunks around the requested position
+ * - Chunk boundaries are snapped to a [loadSize] grid anchored at 0, so the same absolute positions
+ *   are always requested under the same `(offset, limit)` pair and never under overlapping ones
  * - Cache is automatically managed to prevent memory leaks
  * - All operations are debounced to prevent excessive API calls
  * - Thread-safe using Mutex for concurrent access
@@ -251,8 +253,9 @@ public class Pager<T>(
     /**
      * Works out what still has to be fetched around [key] and in which order.
      *
-     * The range closest to [key] comes first, the rest follows [primaryDirection]; already loaded
-     * positions are skipped.
+     * The chunk holding [key] comes first, the rest follows [primaryDirection]; already loaded
+     * positions are skipped. Every chunk is a cell of the [loadSize] grid anchored at 0, so a
+     * position is never requested under two different ranges.
      */
     private fun planLoad(pagingData: PagingMap<T>, key: Int, primaryDirection: Direction): LoadPlan {
         // Calculate the valid range of positions
@@ -266,16 +269,13 @@ public class Pager<T>(
         val fetchFullRange = computeFetchFullRangeForKey(pagingData, key)
 
         // The planned range is tracked at scheduling time; no need to update here
-        // Determine the primary range to load first (centered around the requested position)
-        val startFetchRange =
-            ((coercedKey - loadSize / 2)..<(coercedKey - loadSize / 2 + loadSize))
-                .coerceIn(fetchFullRange)
-                .expandTo(size = loadSize, limit = fetchFullRange.last)
+        // The grid cell holding the requested position is fetched first
+        val startFetchRange = gridCellAt(coercedKey, limit = fetchFullRange.last)
 
-        // Chunks for the primary centered range first
+        // Chunks for the primary grid cell first
         val prioritizedChunks: List<IntRange> = startFetchRange
             .minus(dataRange)
-            .flatMap { it.chunkedRanges(loadSize) }
+            .flatMap { it.gridChunks(limit = fetchFullRange.last) }
 
         val directionalChunks = computeDirectionalChunks(
             fetchFullRange = fetchFullRange,
@@ -286,10 +286,15 @@ public class Pager<T>(
         )
 
         // Do not constrain cacheRange by the (possibly unknown) fullRange; total size may be 0 initially
-        // and will be corrected by remote portions. We keep absolute window around the key.
+        // and will be corrected by remote portions. We keep absolute window around the key. The window
+        // this very load fetches is always kept: grid alignment can push it slightly past the radius,
+        // and pruning what has just been requested would only cause an immediate refetch.
+        val cacheStart = minOf(coercedKey - cacheSize, fetchFullRange.first)
+        val cacheEnd = maxOf(coercedKey + cacheSize - 1, fetchFullRange.last)
+
         return LoadPlan(
-            chunks = prioritizedChunks + directionalChunks,
-            cacheRange = (coercedKey - cacheSize)..<(coercedKey + cacheSize),
+            chunks = (prioritizedChunks + directionalChunks).distinct(),
+            cacheRange = cacheStart..cacheEnd,
         )
     }
 
@@ -312,10 +317,12 @@ public class Pager<T>(
             .takeIf { startFetchRange.last < fetchFullRange.last }
             ?.minus(dataRange) ?: emptyList()
 
-        val beforeChunks: List<IntRange> = extendEdges(beforeRangesRaw, fetchFullRange, loadSize)
-            .flatMap { it.chunkedRanges(loadSize) }
-        val afterChunks: List<IntRange> = extendEdges(afterRangesRaw, fetchFullRange, loadSize)
-            .flatMap { it.chunkedRanges(loadSize) }
+        // No edge extension is needed: grid cells are always a full loadSize, apart from the last one
+        // of the data set.
+        val beforeChunks: List<IntRange> = beforeRangesRaw
+            .flatMap { it.gridChunks(limit = fetchFullRange.last) }
+        val afterChunks: List<IntRange> = afterRangesRaw
+            .flatMap { it.gridChunks(limit = fetchFullRange.last) }
 
         return when (primaryDirection) {
             Direction.Increase -> afterChunks + beforeChunks
@@ -391,11 +398,44 @@ public class Pager<T>(
         val coercedKey = key.coerceIn(fullRange)
 
         return if (pagingData.size > 0) {
-            ((coercedKey - preloadSize)..<coercedKey + preloadSize)
-                .coerceIn(fullRange)
+            // Snap the window outwards to whole grid cells so that every chunk cut out of it starts
+            // on a multiple of loadSize.
+            val start = alignDown((coercedKey - preloadSize).coerceAtLeast(0))
+            val endExclusive = alignUp(coercedKey + preloadSize)
+            (start..<endExclusive).coerceIn(fullRange)
         } else {
             0..<loadSize
         }
+    }
+
+    /** Start of the [loadSize] grid cell holding [position]; the grid is anchored at 0. */
+    private fun alignDown(position: Int): Int = position - position.mod(loadSize)
+
+    /** Smallest grid boundary at or after [position]. */
+    private fun alignUp(position: Int): Int {
+        val remainder = position.mod(loadSize)
+        return if (remainder == 0) position else position + (loadSize - remainder)
+    }
+
+    /** The grid cell holding [position], truncated at [limit] when it is the last one of the data set. */
+    private fun gridCellAt(position: Int, limit: Int): IntRange {
+        val start = alignDown(position)
+        return start..(start + loadSize - 1).coerceAtMost(limit)
+    }
+
+    /**
+     * Splits a range into cells of the [loadSize] grid anchored at 0.
+     *
+     * A range that starts mid-cell is extended back to the cell boundary: requesting the whole cell
+     * keeps the `(offset, limit)` pair stable across passes - which is what makes the request
+     * cacheable - at the cost of re-reading the few positions before it.
+     *
+     * [limit] is the last index worth requesting, so the trailing cell of the data set is truncated
+     * rather than reaching past the end.
+     */
+    private fun IntRange.gridChunks(limit: Int): List<IntRange> {
+        if (first > last) return emptyList()
+        return (alignDown(first)..last step loadSize).map { start -> gridCellAt(start, limit) }
     }
 }
 
@@ -432,27 +472,6 @@ private class CacheAccumulator<T>(private var values: PersistentMap<Int, T>, pri
     }
 }
 
-/**
- * Extends the pieces that touch a boundary of [bounds] to a full [loadSize], so that an edge of the
- * fetch window is never requested as a tiny leftover chunk.
- */
-private fun extendEdges(pieces: List<IntRange>, bounds: IntRange, loadSize: Int): List<IntRange> = pieces.map { piece ->
-    val pieceCount = piece.count()
-    when {
-        piece.first == bounds.first && pieceCount < loadSize -> {
-            val start = (piece.first - (loadSize - pieceCount)).coerceAtLeast(0)
-            start..piece.last
-        }
-
-        piece.last == bounds.last && pieceCount < loadSize -> {
-            val end = piece.last + (loadSize - pieceCount)
-            piece.first..end
-        }
-
-        else -> piece
-    }
-}
-
 // Extension functions for range manipulation
 
 /**
@@ -485,21 +504,3 @@ private operator fun IntRange.contains(range: IntRange): Boolean = range.first i
  * Coerces this range to fit within another range
  */
 private fun IntRange.coerceIn(range: IntRange): IntRange = first.coerceIn(range)..last.coerceIn(range)
-
-/**
- * Splits a range into smaller chunks of specified size
- * Used to break large loading ranges into manageable requests
- */
-private fun IntRange.chunkedRanges(size: Int): List<IntRange> = (first..last step size)
-    .map { start -> start..(start + size - 1).coerceAtMost(last) }
-
-/**
- * Expands a range to reach the specified size, up to the limit
- * Used to ensure minimum load sizes for efficiency
- */
-private fun IntRange.expandTo(size: Int, limit: Int): IntRange {
-    return when {
-        last - first + 1 >= size -> return this
-        else -> first..(first + size - 1).coerceAtMost(limit)
-    }
-}

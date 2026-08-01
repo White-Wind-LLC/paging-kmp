@@ -19,6 +19,13 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `Pager` now snaps every fetch range to a `loadSize` grid anchored at 0, instead of centring the first chunk on the
+  accessed position (#10). Chunk starts used to depend on where the user landed, so a single jump issued overlapping
+  requests (`490..509` and `480..499` for `key=500`, `loadSize=20`) and the same positions were fetched twice; the same
+  data was also requested under different `(offset, limit)` pairs across passes, which no HTTP or CDN cache can reuse
+  and which inflates the key space of offset-paged backends. `StreamingPager` already aligned its chunks this way. The
+  cache window now also always covers the range the current load fetches, so alignment cannot push freshly requested
+  items outside it.
 - `Pager` now drives every load - key access, retry and refresh - from a single collector, so the scheduling state
   (in-flight job, planned range, last read key) is only ever touched from one coroutine.
 - `Pager`, `StreamingPagerConfig` and `PagingMediatorConfig` now reject a cache narrower than the preload window

@@ -25,7 +25,8 @@ Build infinite-scroll lists, virtualized tables, and live-updating feeds with **
 - 📍 **Position-based (indexed) paging** — items are addressed by absolute integer positions, enabling **random access,
   jump-to-index, sparse loading, and correctly sized scrollbars** out of the box.
 - ⚡ **Intelligent preloading & bounded cache** — data is fetched in chunks around the user's position; items far from the
-  viewport are evicted automatically to keep memory flat on long lists.
+  viewport are evicted automatically to keep memory flat on long lists. Chunk boundaries are snapped to a `loadSize`
+  grid, so a position is always requested under the same `(offset, limit)` pair — cacheable and never overlapping.
 - 🔌 **Offline-first** — coordinate a local cache with a remote API via `PagingMediator` (a multiplatform take on
   `RemoteMediator`): serve cache first, fetch missing ranges, reconcile totals.
 - 📡 **Real-time streaming pagination** — `StreamingPager` keeps paginated lists **live** by streaming the total count and
@@ -216,7 +217,8 @@ It then:
 > position, so a cache of `100` holds roughly `200` items. `cacheSize` must be `>= preloadSize` — otherwise the pager
 > would stream a window it cannot retain and throw most of it away on arrival; such a configuration is rejected at
 > construction time. For `StreamingPager`, whose chunk grid is aligned to `loadSize` and therefore reaches slightly
-> past the preload radius, `cacheSize >= preloadSize + loadSize` retains that overshoot too.
+> past the preload radius, `cacheSize >= preloadSize + loadSize` retains that overshoot too. `Pager` aligns its chunks
+> to the same grid, but widens its cache window to whatever the current load fetches, so it needs no extra margin.
 
 Perfect for **live dashboards, trading/price tables, chat & activity feeds, collaborative lists, and order/inventory
 boards** — anywhere the data changes while the user is looking at it.
