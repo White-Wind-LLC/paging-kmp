@@ -11,7 +11,7 @@ kotlinx-coroutines = "1.11.0"
 kermit = "2.0.8"
 buildKonfig = "0.17.1"
 kotlinx-immutable = "0.5.1"
-kotest = "6.0.7"
+kotest = "6.2.3"
 detekt = "2.0.0-alpha.5"
 spotless = "8.9.0"
 
