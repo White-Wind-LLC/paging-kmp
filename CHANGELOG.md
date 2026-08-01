@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped library versions: Kotlin to 2.4.10, kotlinx-coroutines to 1.11.0, Compose Multiplatform to 1.11.1,
+  `androidx-activity-compose` to 1.13.0, and `kotlinx-collections-immutable` to 0.5.1.
+- `paging-samples` no longer builds the `iosX64` target — Compose Multiplatform 1.11 stopped publishing artifacts for
+  it. The published `paging-core` library keeps `iosX64` and its full target set unchanged.
+
 ### Fixed
 
 - StreamingPager: the pager no longer reports `LoadState.Loading` forever after the total shrinks. The out-of-bounds
