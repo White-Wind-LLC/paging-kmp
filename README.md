@@ -362,8 +362,25 @@ Licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) for details.
 
 ## Contributing
 
-PRs and discussions are welcome! Please keep the code style consistent and add an example to `paging-samples` for new
-features.
+PRs and discussions are welcome! Please add an example to `paging-samples` for new features.
+
+Code style is enforced by the build, not by review:
+
+```bash
+./gradlew spotlessApply          # format all Kotlin sources — run before committing
+./gradlew spotlessCheck detekt   # verify formatting and run static analysis
+```
+
+Spotless (ktlint) owns formatting, detekt owns code smells; the two rule sets do not overlap. ktlint settings live in
+the root `build.gradle.kts`, deliberate deviations from detekt's default rules live in
+[`config/detekt/detekt.yml`](config/detekt/detekt.yml), and [`.editorconfig`](.editorconfig) holds the settings your
+editor reads. Both checks are part of `./gradlew check` and run as the `Static analysis` job in CI.
+
+The repository was reformatted in a single commit. To keep `git blame` readable, run once:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
 
 ---
 
