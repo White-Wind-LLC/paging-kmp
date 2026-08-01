@@ -43,11 +43,16 @@ public class PagingMediator<T, Q>(
      * @return Flow of [PagingData] that emits cached data first and then remote updates.
      */
     public fun flow(query: Q): Flow<PagingData<T>> {
+        // One permit pool for the whole pager: the chunks it fetches in parallel and the missing
+        // sub-ranges within each of them draw from the same budget, so `concurrency` stays the
+        // number of requests the remote source can see at once.
+        val fetchPermits = Semaphore(config.concurrency)
         val pager = Pager(
             loadSize = config.loadSize,
             preloadSize = config.prefetchSize,
             cacheSize = config.cacheSize,
-            readData = { position, size -> loadPortion(query, position, size) },
+            concurrency = config.concurrency,
+            readData = { position, size -> loadPortion(query, position, size, fetchPermits) },
         )
         return pager.flow
     }
@@ -71,39 +76,41 @@ public class PagingMediator<T, Q>(
      * @param query Query/filter to pass to the remote source.
      * @param position start position of the requested range.
      * @param size Number of items to load.
+     * @param fetchPermits Permit pool bounding the remote fetches of the whole pager.
      * @return Cold Flow emitting [DataPortion] updates for this range.
      */
-    private fun loadPortion(query: Q, position: Int, size: Int): Flow<DataPortion<T>> = kotlinx.coroutines.flow.flow {
-        val requestedRangeFirst = position
-        val requestedRangeLast = position + size - 1
-        val requestedRange = requestedRangeFirst..requestedRangeLast
+    private fun loadPortion(query: Q, position: Int, size: Int, fetchPermits: Semaphore): Flow<DataPortion<T>> =
+        kotlinx.coroutines.flow.flow {
+            val requestedRangeFirst = position
+            val requestedRangeLast = position + size - 1
+            val requestedRange = requestedRangeFirst..requestedRangeLast
 
-        val localPortion = local.read(position, size, query)
-            .let { portion ->
-                if (config.emitOutdatedRecords) emit(portion)
-                portion.copy(values = portion.values.filter { !config.isRecordStale(it.value) }.toPersistentMap())
-            }
-        if (!config.emitOutdatedRecords) emit(localPortion)
-
-        val missingRanges =
-            if (config.fetchFullRangeOnMiss) {
-                listOf(requestedRange)
-            } else {
-                computeMissingRanges(requestedRange, localPortion.values.keys)
-            }
-
-        if (missingRanges.isNotEmpty()) {
-            // Fetch and persist each missing contiguous range
-            fetchMissingRanges(missingRanges, query, localPortion, requestedRange)
-                .collect { (portion, final) ->
-                    if (!final) {
-                        emit(portion)
-                    } else {
-                        local.save(portion)
-                    }
+            val localPortion = local.read(position, size, query)
+                .let { portion ->
+                    if (config.emitOutdatedRecords) emit(portion)
+                    portion.copy(values = portion.values.filter { !config.isRecordStale(it.value) }.toPersistentMap())
                 }
+            if (!config.emitOutdatedRecords) emit(localPortion)
+
+            val missingRanges =
+                if (config.fetchFullRangeOnMiss) {
+                    listOf(requestedRange)
+                } else {
+                    computeMissingRanges(requestedRange, localPortion.values.keys)
+                }
+
+            if (missingRanges.isNotEmpty()) {
+                // Fetch and persist each missing contiguous range
+                fetchMissingRanges(missingRanges, query, localPortion, requestedRange, fetchPermits)
+                    .collect { (portion, final) ->
+                        if (!final) {
+                            emit(portion)
+                        } else {
+                            local.save(portion)
+                        }
+                    }
+            }
         }
-    }
 
     /**
      * Fetches all missing ranges for the requested window and coordinates emissions.
@@ -119,6 +126,7 @@ public class PagingMediator<T, Q>(
      * @param query Query/filter for the remote source.
      * @param localPortion Portion read from local for the requested range.
      * @param requestedRange Original requested range.
+     * @param fetchPermits Permit pool bounding the remote fetches of the whole pager.
      * @param isRetryAfterClear Internal flag to avoid infinite retries after clearing.
      * @return Flow emitting pairs of (portion, final). When final is true, this is the last emission for the cycle.
      */
@@ -127,26 +135,22 @@ public class PagingMediator<T, Q>(
         query: Q,
         localPortion: DataPortion<T>,
         requestedRange: IntRange,
+        fetchPermits: Semaphore,
         isRetryAfterClear: Boolean = false,
     ): Flow<Pair<DataPortion<T>, Boolean>> = kotlinx.coroutines.flow.flow {
         var shouldEmitMergedPortion = !config.emitIntermediateResults
         val fetchedPortions = if (config.concurrency == 1 || missingRanges.size == 1) {
             missingRanges.map { range ->
-                fetchRange(range, query)
+                fetchRange(range, query, fetchPermits)
                     .also {
                         if (config.emitIntermediateResults) emit(it to false)
                     }
             }
         } else {
             shouldEmitMergedPortion = true
-            val semaphore = Semaphore(config.concurrency)
             coroutineScope {
                 missingRanges.map { range ->
-                    async {
-                        semaphore.withPermit {
-                            fetchRange(range, query)
-                        }
-                    }
+                    async { fetchRange(range, query, fetchPermits) }
                 }.awaitAll()
             }
         }
@@ -159,8 +163,14 @@ public class PagingMediator<T, Q>(
             // Total size can change after loading or be different in different portions. It means that data is
             // inconsistent. We need to refetch the full range of the data.
             if (localPortion.totalSize != 0) local.clear()
-            fetchMissingRanges(listOf(requestedRange), query, localPortion, requestedRange, isRetryAfterClear = true)
-                .collect { emit(it) }
+            fetchMissingRanges(
+                missingRanges = listOf(requestedRange),
+                query = query,
+                localPortion = localPortion,
+                requestedRange = requestedRange,
+                fetchPermits = fetchPermits,
+                isRetryAfterClear = true,
+            ).collect { emit(it) }
         } else {
             fetchedPortions
                 .reduce { acc, portion ->
@@ -177,12 +187,14 @@ public class PagingMediator<T, Q>(
      *
      * @param range Inclusive range to fetch.
      * @param query Query/filter forwarded to the remote data source.
+     * @param fetchPermits Permit pool bounding the remote fetches of the whole pager.
      * @return [DataPortion] containing the fetched items and a total size hint.
      */
-    private suspend fun fetchRange(range: IntRange, query: Q): DataPortion<T> {
-        val fetchSize = range.last - range.first + 1
-        return remote.fetch(range.first, fetchSize, query)
-    }
+    private suspend fun fetchRange(range: IntRange, query: Q, fetchPermits: Semaphore): DataPortion<T> =
+        fetchPermits.withPermit {
+            val fetchSize = range.last - range.first + 1
+            remote.fetch(range.first, fetchSize, query)
+        }
 }
 
 /**
@@ -242,7 +254,8 @@ public interface RemoteDataSource<T, Q> {
  * - [cacheSize]: Cache radius in indices around the current position; items outside are evicted, so
  *   the cache holds up to `2 * cacheSize` items. Must be `>= prefetchSize`.
  * - [isRecordStale]: Predicate used to filter out stale records from local before emission.
- * - [concurrency]: Maximum number of concurrent remote fetches.
+ * - [concurrency]: Maximum number of concurrent remote fetches, counted across the whole pager: the
+ *   chunks of one loading pass and the missing sub-ranges within each chunk share the same budget.
  * - [fetchFullRangeOnMiss]: If true, fetch the full requested range when any position is missing.
  * - [emitOutdatedRecords]: If true, emit raw local data before filtering stale records.
  * - [emitIntermediateResults]: If true, emit each fetched portion as it arrives.

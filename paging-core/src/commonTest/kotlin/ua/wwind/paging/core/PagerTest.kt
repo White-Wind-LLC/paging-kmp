@@ -424,4 +424,129 @@ class PagerTest {
             Pager<Int>(loadSize = 0) { _, _ -> emptyFlow() }
         }
     }
+
+    @Test
+    fun rejects_a_non_positive_concurrency() {
+        shouldThrow<IllegalArgumentException> {
+            Pager<Int>(concurrency = 0) { _, _ -> emptyFlow() }
+        }
+    }
+
+    @Test
+    fun chunks_of_one_pass_are_fetched_concurrently_up_to_the_configured_limit() = runTest {
+        val calls = InFlightRecorder()
+        val pager = countingPager(calls, concurrency = 3, latencyMs = 100)
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+        calls.starts.clear()
+        val jumpedAt = this.testScheduler.currentTime
+
+        checkNotNull(latest).data[500]
+        this.testScheduler.advanceUntilIdle()
+
+        // 6 chunks tile the window around 500; three at a time means two round trips, not six
+        calls.starts.size shouldBe 6
+        calls.maxInFlight shouldBe 3
+        (this.testScheduler.currentTime - jumpedAt) shouldBe 500L // 300 ms debounce + 2 x 100 ms
+
+        job.cancel()
+    }
+
+    @Test
+    fun a_concurrency_of_one_keeps_chunks_serial() = runTest {
+        val calls = InFlightRecorder()
+        val pager = countingPager(calls, concurrency = 1, latencyMs = 100)
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+        calls.starts.clear()
+        val jumpedAt = this.testScheduler.currentTime
+
+        checkNotNull(latest).data[500]
+        this.testScheduler.advanceUntilIdle()
+
+        calls.maxInFlight shouldBe 1
+        (this.testScheduler.currentTime - jumpedAt) shouldBe 900L // 300 ms debounce + 6 x 100 ms
+
+        job.cancel()
+    }
+
+    @Test
+    fun a_concurrent_pass_still_fills_the_whole_window() = runTest {
+        val calls = InFlightRecorder()
+        val pager = countingPager(calls, concurrency = 4, latencyMs = 100)
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+
+        checkNotNull(latest).data[500]
+        this.testScheduler.advanceUntilIdle()
+
+        // every position of the preload window around 500 arrived, exactly once each
+        val loaded = latest.data.values
+        (440..559).all { loaded[it] == it } shouldBe true
+        latest.loadState.shouldBeInstanceOf<LoadState.Success>()
+
+        job.cancel()
+    }
+
+    @Test
+    fun prefetch_starts_on_the_side_the_user_is_scrolling_towards() = runTest {
+        val calls = InFlightRecorder()
+        // One fetch at a time, so the recorded order is the planned order
+        val pager = countingPager(calls, concurrency = 1, latencyMs = 1)
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+
+        val visit: (Int) -> Unit = { key ->
+            latest!!.data[key]
+            this.testScheduler.advanceTimeBy(300)
+            this.testScheduler.advanceUntilIdle()
+        }
+
+        calls.starts.clear()
+        visit(500) // scrolling towards higher indices
+        calls.starts shouldBe listOf(500, 520, 540, 480, 460, 440)
+
+        calls.starts.clear()
+        visit(300) // and back towards lower ones
+        calls.starts shouldBe listOf(300, 280, 260, 240, 320, 340)
+
+        job.cancel()
+    }
+
+    private class InFlightRecorder {
+        val starts: MutableList<Int> = mutableListOf()
+        var inFlight: Int = 0
+        var maxInFlight: Int = 0
+    }
+
+    private fun countingPager(
+        calls: InFlightRecorder,
+        concurrency: Int,
+        latencyMs: Long,
+        totalSize: Int = 1_000,
+    ): Pager<Int> = Pager(
+        loadSize = 20,
+        preloadSize = 60,
+        cacheSize = 100,
+        concurrency = concurrency,
+        readData = { pos, size ->
+            flow {
+                calls.starts += pos
+                calls.inFlight++
+                calls.maxInFlight = maxOf(calls.maxInFlight, calls.inFlight)
+                delay(latencyMs)
+                calls.inFlight--
+                val last = (pos + size - 1).coerceAtMost(totalSize - 1)
+                emit(DataPortion(totalSize = totalSize, values = (pos..last).associateWith { it }.toPersistentMap()))
+            }
+        },
+    )
 }

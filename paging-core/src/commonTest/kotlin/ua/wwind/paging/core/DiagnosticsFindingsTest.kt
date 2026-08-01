@@ -46,7 +46,8 @@ class DiagnosticsFindingsTest {
         preloadSize: Int = 60,
         cacheSize: Int = 100,
         latencyMs: Long = 100,
-    ) = Pager<Int>(loadSize, preloadSize, cacheSize) { pos, size ->
+        concurrency: Int = 4,
+    ) = Pager<Int>(loadSize, preloadSize, cacheSize, concurrency = concurrency) { pos, size ->
         flow {
             calls.starts += pos
             calls.inFlight++
@@ -86,11 +87,9 @@ class DiagnosticsFindingsTest {
      * F1 (fixed): the key debounce used to be applied to the *initial* load as well, so first paint
      *     cost 300 ms + one round trip even though nothing needed debouncing. The first key emission
      *     now bypasses the debounce, leaving only the round trip.
-     * F2: chunks inside one loading pass are fetched strictly sequentially
-     *     (maxInFlight == 1), so filling the preload window costs N round trips.
      */
     @Test
-    fun f1_f2_first_paint_is_not_debounced_but_fetches_are_serial() = runTest {
+    fun f1_first_paint_is_not_debounced() = runTest {
         val calls = Calls()
         val p = pager(calls, latencyMs = 100)
         var firstDataAt = -1L
@@ -101,19 +100,19 @@ class DiagnosticsFindingsTest {
 
         // 100 ms network only: the initial load had nothing to debounce.
         firstDataAt shouldBe 100L
-        calls.maxInFlight shouldBe 1
         job.cancel()
     }
 
     /**
-     * F2 (cont.): a jump to a far position issues every chunk of the preload
-     * window one after another. With a 100 ms backend that is 600 ms of serial
-     * network time to fill a +/-60 item window.
+     * F2 (fixed): chunks inside one loading pass used to be fetched strictly sequentially
+     * (`maxInFlight == 1`), so a jump to a far position paid one round trip per chunk of the
+     * preload window - 900 ms with a 100 ms backend. Up to `concurrency` chunks are now in flight
+     * at a time, and the mutex is no longer held across the fetches.
      */
     @Test
-    fun f2_jump_serialises_the_whole_preload_window() = runTest {
+    fun f2_jump_fills_the_preload_window_concurrently() = runTest {
         val calls = Calls()
-        val p = pager(calls, latencyMs = 100)
+        val p = pager(calls, latencyMs = 100, concurrency = 4)
         var latest: PagingData<Int>? = null
         val job = launch { p.flow.collectLatest { latest = it } }
         testScheduler.advanceUntilIdle()
@@ -124,9 +123,31 @@ class DiagnosticsFindingsTest {
         testScheduler.advanceUntilIdle()
 
         calls.starts.size shouldBe 6
-        calls.maxInFlight shouldBe 1
-        // 300 ms debounce + 6 serial round trips
-        (currentTime - t0) shouldBe 900L
+        calls.maxInFlight shouldBe 4
+        // 300 ms debounce + 6 chunks over 2 round trips, instead of 6 round trips
+        (currentTime - t0) shouldBe 500L
+        job.cancel()
+    }
+
+    /**
+     * F2b (fixed): the direction the position was moving in was computed and then thrown away by a
+     * distance sort spanning both sides of the key, so the window filled symmetrically and half the
+     * requests went to the side being scrolled away from. Each side is now ordered on its own and
+     * the leading one is fetched first.
+     */
+    @Test
+    fun f2b_the_window_fills_towards_the_scroll_direction() = runTest {
+        val calls = Calls()
+        val p = pager(calls, latencyMs = 1, concurrency = 1)
+        var latest: PagingData<Int>? = null
+        val job = launch { p.flow.collectLatest { latest = it } }
+        testScheduler.advanceUntilIdle()
+        calls.starts.clear()
+
+        checkNotNull(latest).data[500] // moving up from 0, so 500+ is what comes into view
+        testScheduler.advanceUntilIdle()
+
+        calls.starts shouldBe listOf(500, 520, 540, 480, 460, 440)
         job.cancel()
     }
 
@@ -149,7 +170,7 @@ class DiagnosticsFindingsTest {
         testScheduler.advanceUntilIdle()
 
         // the chunk holding the key comes first, the rest tiles the window outwards
-        calls.starts shouldBe listOf(500, 480, 520, 460, 540, 440)
+        calls.starts.sorted() shouldBe listOf(440, 460, 480, 500, 520, 540)
         calls.starts.all { it % 20 == 0 } shouldBe true
         // no range is requested twice and none of them overlap
         calls.starts.distinct() shouldBe calls.starts

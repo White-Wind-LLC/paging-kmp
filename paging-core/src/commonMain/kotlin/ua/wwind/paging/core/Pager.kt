@@ -6,8 +6,13 @@ import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,7 +27,9 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlin.math.abs
 
 /**
@@ -32,9 +39,11 @@ import kotlin.math.abs
  * - Data is loaded in chunks around the requested position
  * - Chunk boundaries are snapped to a [loadSize] grid anchored at 0, so the same absolute positions
  *   are always requested under the same `(offset, limit)` pair and never under overlapping ones
+ * - Up to [concurrency] chunks of one pass are fetched in parallel, nearest-first and towards the
+ *   direction the position is moving in
  * - Cache is automatically managed to prevent memory leaks
  * - All operations are debounced to prevent excessive API calls
- * - Thread-safe using Mutex for concurrent access
+ * - Thread-safe using a Mutex, which guards the cache transitions only - never the fetches
  *
  * [preloadSize] and [cacheSize] are both radii in indices around the last accessed position, and
  * `cacheSize >= preloadSize` is required: a cache narrower than the preload window would discard
@@ -49,6 +58,9 @@ import kotlin.math.abs
  * @param keyDebounceMs Debounce delay applied to position changes before a load is scheduled
  * (default: 300). The very first load bypasses it - there is nothing to debounce yet - as do
  * [refresh] and `PagingData.retry`.
+ * @param concurrency Maximum number of chunks fetched in parallel within one loading pass
+ * (default: 4). Filling the preload window costs `ceil(chunks / concurrency)` round trips instead of
+ * one per chunk; set it to 1 for a source that must not be hit in parallel.
  * @param readData function to load data portions from the data source
  */
 @OptIn(FlowPreview::class)
@@ -57,11 +69,13 @@ public class Pager<T>(
     private val preloadSize: Int = 60,
     private val cacheSize: Int = 100,
     private val keyDebounceMs: Long = 300,
+    private val concurrency: Int = 4,
     private val readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>,
 ) {
     init {
         require(loadSize > 0) { "loadSize must be > 0" }
         require(preloadSize >= 0) { "preloadSize must be >= 0" }
+        require(concurrency >= 1) { "concurrency must be >= 1" }
         require(cacheSize >= preloadSize) {
             cacheRadiusTooSmallMessage(cacheSize, preloadName = "preloadSize", preloadSize = preloadSize)
         }
@@ -71,7 +85,8 @@ public class Pager<T>(
     // External refresh trigger (fan-out to active collections)
     private val refreshRequests: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 64)
 
-    private enum class Direction { Increase, Decrease }
+    /** Where the accessed position is heading, which is the side worth prefetching first. */
+    private enum class Direction { Forward, Backward }
 
     /** What made the pipeline schedule a load; decides how the in-flight load is treated. */
     private enum class Reason { Access, Retry, Refresh }
@@ -171,8 +186,10 @@ public class Pager<T>(
                     }
                 }
 
+                // A key below the previous one means the user is moving towards lower indices; the
+                // very first access has nothing to compare against and prefetches forwards.
                 val direction =
-                    if (lastReadKey >= 0 && key < lastReadKey) Direction.Increase else Direction.Decrease
+                    if (lastReadKey >= 0 && key < lastReadKey) Direction.Backward else Direction.Forward
 
                 currentLoadingRange = computeFetchFullRangeForKey(data.value, key)
                 val job = launch {
@@ -222,6 +239,9 @@ public class Pager<T>(
      *    which order they should be fetched
      * 2. [runLoads] fetches them, updating the cache and the load state as portions arrive
      * 3. Errors are converted into [LoadState.Error] so the caller can retry
+     *
+     * [mutex] is only taken around the cache transitions inside [runLoads]; holding it across the
+     * fetches would serialise them and block the next load behind the one it supersedes.
      */
     private suspend fun loadPortion(
         dataFlow: MutableStateFlow<PagingMap<T>>,
@@ -230,7 +250,7 @@ public class Pager<T>(
         key: Int,
         primaryDirection: Direction,
         onGet: (Int) -> Unit,
-    ) = mutex.withLock {
+    ) {
         try {
             val pagingData = dataFlow.value
             val plan = planLoad(pagingData, key, primaryDirection)
@@ -239,6 +259,7 @@ public class Pager<T>(
                 cachedValues = pagingData.values,
                 dataFlow = dataFlow,
                 loadStateFlow = loadStateFlow,
+                mutex = mutex,
                 onGet = onGet,
             )
         } catch (e: CancellationException) {
@@ -300,8 +321,10 @@ public class Pager<T>(
     }
 
     /**
-     * Orders the ranges surrounding the primary one: when moving up (new key < old), increasing
-     * indices are loaded first, otherwise decreasing ones.
+     * Orders the ranges surrounding the primary one: the side the position is moving towards comes
+     * first in full, and only then the side it is moving away from. Each of the two groups is
+     * ordered nearest-first on its own - sorting across both would interleave them and leave the
+     * direction with no effect beyond ties.
      */
     private fun computeDirectionalChunks(
         fetchFullRange: IntRange,
@@ -317,44 +340,61 @@ public class Pager<T>(
         val afterChunks: List<IntRange> = ((startFetchRange.last + 1)..fetchFullRange.last)
             .missingChunks(presentKeys, limit = fetchFullRange.last)
 
+        val nearestFirst: Comparator<IntRange> = compareBy { abs(it.first - key) }
         return when (primaryDirection) {
-            Direction.Increase -> afterChunks + beforeChunks
-            Direction.Decrease -> beforeChunks + afterChunks
-        }.sortedBy { abs(it.first - key) }
+            Direction.Forward -> afterChunks.sortedWith(nearestFirst) + beforeChunks.sortedWith(nearestFirst)
+            Direction.Backward -> beforeChunks.sortedWith(nearestFirst) + afterChunks.sortedWith(nearestFirst)
+        }
     }
 
     /**
-     * Fetches every range of [plan] in order, publishing each portion as it arrives.
+     * Fetches every range of [plan], publishing each portion as it arrives.
+     *
+     * Up to [concurrency] ranges are in flight at a time; they are started in the planned order, so
+     * the chunk holding the accessed position and the ones ahead of it get the first permits.
      *
      * [cachedValues] is the cache snapshot the merges start from; it is pruned to the plan's cache
-     * window before the first fetch.
+     * window before the first fetch. [mutex] serialises the merges - concurrent fetches share one
+     * accumulator - and is never held across a fetch.
      */
     private suspend fun runLoads(
         plan: LoadPlan,
         cachedValues: PersistentMap<Int, T>,
         dataFlow: MutableStateFlow<PagingMap<T>>,
         loadStateFlow: MutableStateFlow<LoadState>,
+        mutex: Mutex,
         onGet: (Int) -> Unit,
     ) {
+        // Only proceed if there's something to load
+        val chunks = plan.chunks.toNonEmptyListOrNull() ?: return
+
         // Apply cache size limit (immutable). We must avoid mutating the same Map instance
         // across emissions, otherwise StateFlow's equality check can suppress updates.
         val cache = CacheAccumulator(cachedValues.pruneToRange(plan.cacheRange), plan.cacheRange)
 
-        plan.chunks
-            .toNonEmptyListOrNull() // Only proceed if there's something to load
-            ?.also {
-                loadStateFlow.value = LoadState.Loading // Signal loading started
-            }?.onEach { fetchRange ->
-                // Load each range
-                val fetchSize = fetchRange.last - fetchRange.first + 1
-                readData(fetchRange.first, fetchSize)
-                    .collect { portion ->
-                        // Build a new immutable map snapshot for each emission to ensure StateFlow emits
-                        dataFlow.update { currentData -> cache.next(currentData, portion, onGet) }
+        loadStateFlow.value = LoadState.Loading // Signal loading started
+        val permits = Semaphore(concurrency)
+        coroutineScope {
+            chunks.map { fetchRange ->
+                async {
+                    permits.withPermit {
+                        val fetchSize = fetchRange.last - fetchRange.first + 1
+                        readData(fetchRange.first, fetchSize)
+                            .collect { portion ->
+                                mutex.withLock {
+                                    // A superseded load is cancelled before its successor starts, and an
+                                    // uncontended lock does not suspend, so the check has to be explicit:
+                                    // without it a dying pass could publish its window over the new one.
+                                    currentCoroutineContext().ensureActive()
+                                    // Build a new immutable map snapshot for each emission to ensure StateFlow emits
+                                    dataFlow.value = cache.next(dataFlow.value, portion, onGet)
+                                }
+                            }
                     }
-            }?.also {
-                loadStateFlow.value = LoadState.Success // Signal loading completed
-            }
+                }
+            }.awaitAll()
+        }
+        loadStateFlow.value = LoadState.Success // Signal loading completed
     }
 
     private fun computeFetchFullRangeForKey(pagingData: PagingMap<T>, key: Int): IntRange {
@@ -427,6 +467,9 @@ private data class LoadPlan(val chunks: List<IntRange>, val cacheRange: IntRange
  * [cacheRange] is fixed for the duration of a call, so once the values have been pruned to it every
  * later merge only has to write its own delta. A portion that changes the total size replaces the
  * map wholesale, which breaks that invariant, so the next merge prunes again.
+ *
+ * The chunks of a call run concurrently and share one accumulator, so [next] is only ever called
+ * under the pager's mutex.
  */
 private class CacheAccumulator<T>(private var values: PersistentMap<Int, T>, private val cacheRange: IntRange) {
     private var pruned: Boolean = true

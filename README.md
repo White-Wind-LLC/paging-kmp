@@ -87,6 +87,7 @@ val pager = Pager<User>(
     preloadSize = 60,     // preload radius around the current position
     cacheSize = 100,      // cache radius around the current position — must be >= preloadSize
     keyDebounceMs = 300,  // settle time for scrolling; the first load is never debounced
+    concurrency = 4,      // chunks fetched in parallel per loading pass
     readData = { position, loadSize ->
         flow {
             val users = repository.getUsers(position, loadSize)
@@ -158,6 +159,16 @@ Both bypass the key debounce and reload immediately:
 Position changes are debounced by `keyDebounceMs` (300 ms by default) so that fast scrolling does not issue a request
 per row. Two cases skip it: the **initial load**, which has no scroll to settle, and explicit `retry` / `refresh`
 calls. Set `keyDebounceMs = 0` if your source is local and cheap enough to serve every position change.
+
+### Parallel prefetching
+
+A jump lands in the middle of an empty window, which is tiled into several chunks. `Pager` keeps up to `concurrency`
+of them in flight (4 by default), so filling the window costs `ceil(chunks / concurrency)` round trips rather than one
+per chunk — with a 100 ms backend, a ±60 item window around the jump target arrives in 200 ms instead of 600 ms. The
+chunk holding the accessed position is always requested first, then the side the position is moving towards, then the
+side it is moving away from; each side nearest-first. Set `concurrency = 1` for a source that must not be hit in
+parallel. `PagingMediator` passes its own `concurrency` down to the pager and caps both levels with a single budget,
+so it stays the number of requests your remote source can see at once.
 
 ## Compose Integration
 
@@ -320,7 +331,7 @@ val mediator = PagingMediator(
         loadSize = 20,                  // items per page
         prefetchSize = 60,              // prefetch radius around the current position
         cacheSize = 100,                // cache radius — must be >= prefetchSize
-        concurrency = 2,                // concurrent remote fetches
+        concurrency = 2,                // concurrent remote fetches, across the whole pager
         isRecordStale = { false },      // decide if a cached record must be refreshed
         fetchFullRangeOnMiss = false,   // refetch the full window on miss/inconsistency
         emitOutdatedRecords = false,    // emit stale records while refreshing
