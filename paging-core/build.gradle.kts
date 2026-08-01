@@ -1,10 +1,15 @@
 @file:OptIn(ExperimentalWasmDsl::class)
+import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
+import org.gradle.api.Action
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     kotlin("multiplatform")
     alias(libs.plugins.maven.publish)
-    alias(libs.plugins.android.library)
+    // AGP 9 removed Kotlin Multiplatform support from com.android.library; this is its
+    // multiplatform replacement, configured through the kotlin { android(...) } block below.
+    alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.buildkonfig)
 }
 
@@ -12,7 +17,22 @@ kotlin {
     explicitApi()
     jvmToolchain(17)
     jvm()
-    androidTarget()
+    // AGP registers its multiplatform Android target as an extension named "android" on the
+    // Kotlin extension. A bare `android { }` cannot be used here: in a plain build script it
+    // binds to KGP's own deprecated `android()` target shortcut, which shadows the accessor and
+    // fails to compile. Passing an Action makes that shortcut inapplicable, so the AGP
+    // extension wins. (Convention plugins can write `android { }` directly.)
+    android(
+        Action<KotlinMultiplatformAndroidLibraryTarget> {
+            namespace = "ua.wwind.paging.core"
+            compileSdk = 36
+            minSdk = 21
+
+            compilerOptions {
+                jvmTarget.set(JvmTarget.JVM_17)
+            }
+        },
+    )
     js {
         nodejs {
             // DiagnosticsFindingsTest runs micro-benchmarks that exceed Mocha's 2s default.
@@ -48,17 +68,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.kotest.assertions.core)
         }
-    }
-}
-
-android {
-    namespace = "ua.wwind.paging.core"
-    compileSdk = 36
-    defaultConfig {
-        minSdk = 21
-    }
-    publishing {
-        singleVariant("release")
     }
 }
 

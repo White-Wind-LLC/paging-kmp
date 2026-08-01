@@ -23,6 +23,12 @@ All notable changes to this project will be documented in this file.
 - Bumped the BuildKonfig Gradle plugin to 0.22.0 (build-only, no effect on the published artifacts).
 - `paging-samples` no longer builds the `iosX64` target — Compose Multiplatform 1.11 stopped publishing artifacts for
   it. The published `paging-core` library keeps `iosX64` and its full target set unchanged.
+- Upgraded the Android Gradle Plugin to 9.3.1 (from 8.13.2) and the Gradle wrapper to 9.6.1 (from 9.2.1, the minimum
+  AGP 9.3.1 accepts is 9.5.0). AGP 9 dropped Kotlin Multiplatform support from `com.android.library`, so both modules
+  now apply `com.android.kotlin.multiplatform.library` and configure Android from inside the `kotlin { }` block
+  instead of a top-level `android { }` one. Published coordinates are unchanged — the Android artifact is still
+  `paging-core-android`; only the internal Gradle publication name changes (`androidRelease` -> `android`), which
+  consumers do not match on.
 
 ### Documentation
 
