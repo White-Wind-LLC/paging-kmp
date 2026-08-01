@@ -1,59 +1,60 @@
-# Статичний аналіз: detekt і Spotless
+# Static analysis: detekt and Spotless
 
-**Дата:** 2026-08-01
-**Статус:** затверджено
+**Date:** 2026-08-01
+**Status:** approved
 
-## Проблема
+## Problem
 
-У проєкті немає жодного інструмента статичного аналізу. Стиль коду тримається на дисципліні
-автора та налаштуваннях IDE, а розділ «Contributing» у `README.md` просить «keep the code style
-consistent», не пояснюючи, що це означає й чим це перевірити. Немає ні `.editorconfig`, ні
-лінтера, ні перевірки на рівні збірки. Розбіжності у форматуванні спливають у код-рев'ю замість
-того, щоб виправлятися автоматично.
+The project has no static analysis tooling at all. Code style relies on the author's discipline
+and IDE settings, and the "Contributing" section in `README.md` asks to "keep the code style
+consistent" without explaining what that means or how to check it. There is no `.editorconfig`,
+no linter, no build-level check. Formatting discrepancies surface in code review instead of being
+fixed automatically.
 
-## Мета
+## Goal
 
-1. Форматування Kotlin-коду перевіряється й виправляється автоматично, однією командою.
-2. Типові дефекти (складність, потенційні баги, стилістика) ловляться лінтером до мерджу.
-3. І те, і те падає локально на `./gradlew check` та окремим швидким чеком у CI.
+1. Kotlin code formatting is checked and fixed automatically, with a single command.
+2. Common defects (complexity, potential bugs, style) are caught by a linter before merge.
+3. Both fail locally on `./gradlew check` and via a separate fast check in CI.
 
-## Обсяг
+## Scope
 
-**Входить:**
+**In scope:**
 
-- Плагін Spotless із форматером ktlint — **тільки для файлів `*.kt`**.
-- Плагін detekt 2.0.0-alpha.5 (координати `dev.detekt`) із дефолтним набором правил і
-  невеликим файлом точкових відхилень.
-- Файл `.editorconfig` у корені як джерело правил для ktlint та IDE.
-- Новий джоб `static-analysis` у наявному `.github/workflows/ci.yml`.
-- Одноразове переформатування наявного коду та виправлення знайдених зауважень.
-- Файл `.git-blame-ignore-revs` із коммітом переформатування.
-- Оновлення розділу «Contributing» у `README.md`.
+- The Spotless plugin with the ktlint formatter — **only for `*.kt` files**.
+- The detekt 2.0.0-alpha.5 plugin (coordinates `dev.detekt`) with the default ruleset and a
+  small file of targeted suppressions.
+- An `.editorconfig` file at the root as the source of rules for ktlint and the IDE.
+- A new `static-analysis` job in the existing `.github/workflows/ci.yml`.
+- A one-time reformatting of the existing code and fixes for the findings discovered.
+- A `.git-blame-ignore-revs` file with the reformatting commit.
+- An update to the "Contributing" section in `README.md`.
 
-**Не входить:**
+**Out of scope:**
 
-- Spotless для `*.gradle.kts`, `*.md`, `*.yaml`, `*.toml` — свідомо, за рішенням щодо обсягу.
-- Ruleset `detekt-rules-ktlint-wrapper` — форматування веде виключно Spotless.
-- Режим detekt як плагіна компілятора (`enableCompilerPlugin`) і, відповідно, type resolution.
-- `detekt-baseline.xml` — усі зауваження розгрібаються одразу.
-- Локальний pre-commit hook.
-- Покриття коду, binary-compatibility-validator.
+- Spotless for `*.gradle.kts`, `*.md`, `*.yaml`, `*.toml` — deliberately, as a scope decision.
+- The `detekt-rules-ktlint-wrapper` ruleset — formatting is handled exclusively by Spotless.
+- Running detekt as a compiler plugin (`enableCompilerPlugin`) and, consequently, type
+  resolution.
+- `detekt-baseline.xml` — all findings are addressed immediately.
+- A local pre-commit hook.
+- Code coverage, binary-compatibility-validator.
 
-## Розподіл відповідальності
+## Division of responsibility
 
-Два інструменти не перетинаються, і це не збіг, а умова конфігурації:
+The two tools do not overlap, and that is not a coincidence but a configuration constraint:
 
-| Інструмент | Відповідає за | Виправляє автоматично |
+| Tool | Responsible for | Auto-fixes |
 |---|---|---|
-| Spotless + ktlint | розкладку тексту: відступи, переноси, пробіли, порядок імпортів | так, `spotlessApply` |
-| detekt | смисл коду: складність, потенційні баги, іменування, мертвий код | ні |
+| Spotless + ktlint | text layout: indentation, line breaks, whitespace, import order | yes, `spotlessApply` |
+| detekt | code meaning: complexity, potential bugs, naming, dead code | no |
 
-У detekt 2 форматувальні правила винесені в окремий артефакт
-`dev.detekt:detekt-rules-ktlint-wrapper`, який публікується самостійно й не входить у типову
-залежність плагіна. Ми його не підключаємо — отже, накладання правил ktlint із двох боків
-неможливе за побудовою, без жодних ручних виключень у конфігу.
+In detekt 2, the formatting rules are split out into a separate artifact,
+`dev.detekt:detekt-rules-ktlint-wrapper`, which is published independently and is not part of
+the plugin's default dependency. We do not add it — so overlap between ktlint rules from both
+sides is impossible by construction, with no manual exclusions needed in the config.
 
-## Архітектура
+## Architecture
 
 ### Version catalog
 
@@ -69,27 +70,27 @@ detekt = { id = "dev.detekt", version.ref = "detekt" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 ```
 
-Версія ktlint окремо не фіксується: Spotless 8.9.0 везе ktlint 1.8.0 і викликається як
-`ktlint()` без аргументів. Оновлення ktlint відбувається разом з оновленням Spotless — одна
-змінна замість двох, які треба тримати сумісними.
+The ktlint version is not pinned separately: Spotless 8.9.0 ships ktlint 1.8.0 and is invoked as
+`ktlint()` with no arguments. Updating ktlint happens together with updating Spotless — one
+variable instead of two that would need to be kept compatible.
 
-### Підключення в корені
+### Wiring at the root
 
-Обидва плагіни оголошуються в кореневому `build.gradle.kts` з `apply false` і роздаються через
-наявний блок `allprojects {}` — так само, як там уже роздається Dokka:
+Both plugins are declared in the root `build.gradle.kts` with `apply false` and are applied
+through the existing `allprojects {}` block — the same way Dokka is already applied there:
 
 ```kotlin
 import com.diffplug.gradle.spotless.SpotlessExtension
 import dev.detekt.gradle.extensions.DetektExtension
 
 plugins {
-    // ... наявні плагіни
+    // ... existing plugins
     alias(libs.plugins.detekt) apply false
     alias(libs.plugins.spotless) apply false
 }
 
 allprojects {
-    // ... наявна конфігурація
+    // ... existing configuration
     apply(plugin = "org.jetbrains.dokka")
     apply(plugin = "com.diffplug.spotless")
     apply(plugin = "dev.detekt")
@@ -113,23 +114,24 @@ allprojects {
 }
 ```
 
-Конфігурація ведеться через `extensions.configure<T>()`, а не через блоки `spotless { }` /
-`detekt { }`: типізовані аксесори Gradle генеруються лише для плагінів, застосованих у блоці
-`plugins {}` того самого скрипта, а тут плагіни застосовуються динамічно всередині
-`allprojects`. Класи розширень доступні для імпорту, бо `apply false` усе одно кладе плагін на
-classpath збірки.
+Configuration is done via `extensions.configure<T>()` rather than `spotless { }` /
+`detekt { }` blocks: typed Gradle accessors are only generated for plugins applied within the
+`plugins {}` block of that same script, whereas here the plugins are applied dynamically inside
+`allprojects`. The extension classes are still importable because `apply false` puts the plugin
+on the build classpath regardless.
 
-Кореневий проєкт теж отримує обидва плагіни. Він не має каталогу `src`, тож `target("src/**")`
-дає порожній набір, а задачі `:spotlessCheck` і `:detekt` виконуються вхолосту. Це прийнятна
-ціна за одне місце конфігурації: третій модуль, доданий у майбутньому, потрапляє під аналіз
-автоматично.
+The root project also receives both plugins. It has no `src` directory, so `target("src/**")`
+yields an empty set and the `:spotlessCheck` and `:detekt` tasks run as no-ops. This is an
+acceptable price for having a single point of configuration: a third module added in the future
+is automatically covered by the analysis.
 
-Окрема проводка до `check` не потрібна — обидва плагіни чіпляють свої `*Check`-задачі самі.
+No separate wiring to `check` is needed — both plugins hook their own `*Check` tasks
+automatically.
 
 ### `.editorconfig`
 
-Новий файл у корені репозиторію. Саме звідти ktlint читає правила; без нього форматер працює на
-власних дефолтах, які можуть розійтися з IDE.
+A new file at the root of the repository. This is exactly where ktlint reads its rules from;
+without it, the formatter falls back to its own defaults, which can diverge from the IDE.
 
 ```ini
 root = true
@@ -150,34 +152,36 @@ max_line_length = 120
 indent_size = 2
 ```
 
-Ключове рішення — `ktlint_code_style = intellij_idea`, а не `ktlint_official`. У
-`gradle.properties` уже стоїть `kotlin.code.style=official`, тобто IDE форматує код у стилі
-JetBrains. `ktlint_official` — це власний, помітно суворіший стиль ktlint (зокрема інші правила
-переносу параметрів і обов'язкові trailing commas). Обравши `intellij_idea`, ми гарантуємо, що
-`Cmd+Alt+L` в IDE та `spotlessApply` дають однаковий результат; інакше розробник, який
-відформатував файл засобами IDE, отримував би червоний `spotlessCheck`.
+The key decision is `ktlint_code_style = intellij_idea`, not `ktlint_official`.
+`gradle.properties` already has `kotlin.code.style=official`, meaning the IDE formats code in
+JetBrains's style. `ktlint_official` is ktlint's own, noticeably stricter style (in particular,
+different parameter-wrapping rules and mandatory trailing commas). By choosing `intellij_idea`,
+we guarantee that `Cmd+Alt+L` in the IDE and `spotlessApply` produce the same result; otherwise a
+developer who formatted a file using the IDE would get a failing `spotlessCheck`.
 
 ### `config/detekt/detekt.yml`
 
-Файл містить **лише** відхилення від дефолту (`buildUponDefaultConfig = true`), а не копію
-повного конфігу на ~800 рядків. Це навмисно: копія дефолту застаріває з кожним оновленням
-detekt і приховує, що саме ми змінили свідомо.
+The file contains **only** deviations from the default (`buildUponDefaultConfig = true`), not a
+copy of the full ~800-line config. This is deliberate: a copy of the defaults goes stale with
+every detekt update and hides what we actually changed intentionally.
 
-Допускаються записи рівно двох видів:
+Exactly two kinds of entries are allowed:
 
-1. **Вимкнене або послаблене правило** — обов'язково з коментарем, який пояснює причину.
-2. **Виключення тестових шляхів.** Дефолтні виключення detekt орієнтовані на шаблони на кшталт
-   `**/test/**`, тоді як у KMP-модулі шляхи мають вигляд `paging-core/src/commonTest/kotlin/…`.
-   Тестові патерни (`**/commonTest/**`, `**/jvmTest/**`, `**/androidUnitTest/**`) виносяться в
-   YAML-anchor і перевикористовуються правилами, які на тестах шумлять.
+1. **A disabled or relaxed rule** — always with a comment explaining the reason.
+2. **Exclusion of test paths.** detekt's default exclusions target patterns like `**/test/**`,
+   whereas in the KMP module the paths look like
+   `paging-core/src/commonTest/kotlin/…`. Test patterns (`**/commonTest/**`, `**/jvmTest/**`,
+   `**/androidUnitTest/**`) are factored into a YAML anchor and reused by the rules that are
+   noisy on tests.
 
-Конкретний перелік записів формується під час реалізації за результатом першого прогону.
-Правило ухвалення рішення задане тут і не залишає простору для «хай поки шумить»: кожне
-зауваження або виправляється в коді, або глушиться в `detekt.yml` із письмовим обґрунтуванням.
+The specific list of entries is filled in during implementation based on the first run's
+results. The decision rule is fixed here and leaves no room for "let it stay noisy for now":
+every finding is either fixed in the code or suppressed in `detekt.yml` with a written
+justification.
 
 ### CI
 
-У наявний `.github/workflows/ci.yml` додається третій джоб — паралельно до `test-linux` і
+A third job is added to the existing `.github/workflows/ci.yml`, alongside `test-linux` and
 `test-apple`:
 
 ```yaml
@@ -221,18 +225,19 @@ detekt і приховує, що саме ми змінили свідомо.
           retention-days: 7
 ```
 
-Три рішення в цьому джобі варті пояснення.
+Three decisions in this job are worth explaining.
 
-**Немає кешу `~/.konan`.** Standalone-задача detekt не компілює код, тож тулчейн Kotlin/Native
-не потрібен. Це і є причина, чому джоб швидкий: секунди-хвилини проти сорока з гаком хвилин у
-тестових джобах, тобто фідбек про формат приходить задовго до результатів тестів.
+**No `~/.konan` cache.** The standalone detekt task does not compile code, so the Kotlin/Native
+toolchain is not needed. This is exactly why the job is fast: seconds to minutes versus well
+over forty minutes in the test jobs, meaning formatting feedback arrives well before test
+results.
 
-**Немає `-PexcludeSamples=true`**, на відміну від `test-linux`. Модуль `paging-samples` — теж
-наш код, і виключати його з аналізу означало б лишити третину репозиторію без перевірки. Важкої
-збірки тут немає, а Android SDK на `ubuntu-latest` передвстановлений, тож конфігурація модуля
-проходить.
+**No `-PexcludeSamples=true`**, unlike `test-linux`. The `paging-samples` module is also our
+code, and excluding it from analysis would leave a third of the repository unchecked. There is
+no heavy build here, and the Android SDK is preinstalled on `ubuntu-latest`, so the module's
+configuration succeeds.
 
-**Джоб додається в `needs` гейта `ci`** разом із перевіркою результату:
+**The job is added to the `needs` of the `ci` gate**, together with a check of its result:
 
 ```yaml
   ci:
@@ -241,11 +246,11 @@ detekt і приховує, що саме ми змінили свідомо.
     [ "${{ needs.static-analysis.result }}" = "success" ] || exit 1
 ```
 
-Завдяки цьому налаштування branch protection міняти не треба: required status check `ci` уже
-налаштований і тепер починає враховувати статичний аналіз.
+Thanks to this, the branch protection settings do not need to change: the required status check
+`ci` is already configured and now starts taking static analysis into account.
 
-**Зміна в наявному джобі `test-linux`.** Щоб не ганяти ті самі задачі двічі, крок `Run checks`
-доповнюється виключеннями:
+**Change to the existing `test-linux` job.** To avoid running the same tasks twice, the
+`Run checks` step is extended with exclusions:
 
 ```
 ./gradlew -PexcludeSamples=true check \
@@ -253,65 +258,67 @@ detekt і приховує, що саме ми змінили свідомо.
   -x spotlessCheck -x detekt
 ```
 
-## Критерії приймання
+## Acceptance criteria
 
-1. `./gradlew spotlessCheck detekt` на чистому дереві завершується успіхом.
-2. `./gradlew check` без додаткових прапорців виконує обидві задачі (перевіряється за
-   `--dry-run`).
-3. **Покриття source set'ів.** У KMP detekt реєструє і зведену задачу, і задачі на компіляцію;
-   на що саме дивиться `./gradlew detekt` у 2.0.0-alpha.5, перевіряється емпірично: тимчасове
-   порушення вноситься в `paging-core/src/commonMain` і в `paging-samples/src/iosMain`, обидва
-   мають бути знайдені. Якщо зведена задача покриває не все — потрібні задачі довішуються до
-   `check` явно.
-4. **Configuration cache.** У проєкті стоїть `org.gradle.configuration-cache=true`. Два
-   послідовні прогони `./gradlew spotlessCheck detekt`, другий має повідомити
+1. `./gradlew spotlessCheck detekt` succeeds on a clean tree.
+2. `./gradlew check` without extra flags runs both tasks (verified via `--dry-run`).
+3. **Source set coverage.** In KMP, detekt registers both an aggregate task and per-compilation
+   tasks; what exactly `./gradlew detekt` in 2.0.0-alpha.5 looks at is verified empirically: a
+   temporary violation is introduced into `paging-core/src/commonMain` and
+   `paging-samples/src/iosMain`, and both must be found. If the aggregate task does not cover
+   everything, the needed tasks are explicitly appended to `check`.
+4. **Configuration cache.** The project has `org.gradle.configuration-cache=true` set. Two
+   consecutive runs of `./gradlew spotlessCheck detekt`, and the second one must report
    `Reusing configuration cache`.
-5. **Ідемпотентність форматера.** Повторний `./gradlew spotlessApply` після першого не дає
-   змін у робочому дереві.
-6. **Узгодженість з IDE.** Форматування довільного файлу засобами IDE (`Cmd+Alt+L`) не створює
-   розбіжності зі `spotlessCheck`.
-7. Джоб `static-analysis` зелений на пул-ріквесті, гейт `ci` враховує його результат.
+5. **Formatter idempotence.** Running `./gradlew spotlessApply` again after the first run
+   produces no changes in the working tree.
+6. **Consistency with the IDE.** Formatting an arbitrary file with the IDE (`Cmd+Alt+L`) does
+   not create a discrepancy with `spotlessCheck`.
+7. The `static-analysis` job is green on the pull request, and the `ci` gate takes its result
+   into account.
 
-## План викочування
+## Rollout plan
 
-Три окремі комміти — послідовність важлива:
+Three separate commits — the order matters:
 
-1. **Інфраструктура.** `libs.versions.toml`, кореневий `build.gradle.kts`, `.editorconfig`,
-   `config/detekt/detekt.yml`, `ci.yml`. Збірка на цьому коміті ще червона — це очікувано.
-2. **`spotlessApply`.** Масове переформатування ~45 файлів і **нічого більше**: жодних правок
-   логіки, жодних змін конфігу.
-3. **Правки під detekt.** Виправлення в коді плюс фінальні записи в `detekt.yml`.
+1. **Infrastructure.** `libs.versions.toml`, the root `build.gradle.kts`, `.editorconfig`,
+   `config/detekt/detekt.yml`, `ci.yml`. The build is still red after this commit — that is
+   expected.
+2. **`spotlessApply`.** A bulk reformatting of ~45 files and **nothing else**: no logic changes,
+   no config changes.
+3. **detekt fixes.** Code fixes plus the final entries in `detekt.yml`.
 
-Другий комміт тримається окремим саме для того, щоб додати його SHA у новий файл
-`.git-blame-ignore-revs` — інакше `git blame` по всій бібліотеці почне вказувати на
-переформатування замість авторів реальних змін. Файл підхоплюється GitHub автоматично; для
-локального `git blame` у README додається команда
+The second commit is kept separate specifically so its SHA can be added to a new
+`.git-blame-ignore-revs` file — otherwise `git blame` across the whole library would start
+pointing at the reformatting instead of the authors of the actual changes. The file is picked up
+automatically by GitHub; for local `git blame`, a command is added to the README:
 `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
 
-## Ризики
+## Risks
 
-**detekt 2.0.0-alpha.5 — альфа.** Це усвідомлений вибір: гілка 1.23.x не розвивається й має
-відомі проблеми з Gradle 9 (у проєкті — Gradle 9.2.1), тоді як 2.x на нього орієнтована. Ризик
-проявиться на першому ж локальному прогоні, не пізніше. Відкат — зміна двох рядків у version
-catalog на `io.gitlab.arturbosch.detekt` 1.23.8 плюс зміна id плагіна; він не безкоштовний, і
-якщо 1.23.8 не заведеться на Gradle 9, альтернативою лишається тимчасово підключити detekt лише
-до `paging-core` або відкласти detekt, залишивши Spotless.
+**detekt 2.0.0-alpha.5 is an alpha.** This is a conscious choice: the 1.23.x branch is no longer
+developed and has known issues with Gradle 9 (the project is on Gradle 9.2.1), while 2.x targets
+it. The risk will surface on the very first local run, at the latest. The rollback is a two-line
+change in the version catalog to `io.gitlab.arturbosch.detekt` 1.23.8 plus a change to the plugin
+id; it is not free, and if 1.23.8 does not work on Gradle 9 either, the remaining options are to
+temporarily wire detekt only into `paging-core`, or to postpone detekt and keep only Spotless.
 
-**Configuration cache.** Spotless 8.x підтримує його повністю з версії 7.0. Для alpha-версії
-detekt це не гарантовано. Якщо кеш ламається — джоб `static-analysis` тимчасово запускається з
-`--no-configuration-cache`; це локалізує проблему в CI й не чіпає решту збірки.
+**Configuration cache.** Spotless 8.x fully supports it as of version 7.0. For the alpha version
+of detekt, this is not guaranteed. If the cache breaks, the `static-analysis` job is temporarily
+run with `--no-configuration-cache`; this isolates the problem to CI without affecting the rest
+of the build.
 
-**Обсяг переформатування.** 45 файлів у другому коміті — великий diff. Пом'якшується тим, що він
-ізольований і потрапляє в `.git-blame-ignore-revs`.
+**Scope of reformatting.** 45 files in the second commit is a large diff. This is mitigated by
+the fact that it is isolated and captured in `.git-blame-ignore-revs`.
 
-## Документація
+## Documentation
 
-Розділ «Contributing» у `README.md` наразі просить «keep the code style consistent», не
-пояснюючи як. Замінюється на конкретику: `./gradlew spotlessApply` перед коммітом,
-`./gradlew spotlessCheck detekt` для перевірки, згадка про `.editorconfig` як джерело правил і
-рядок про `blame.ignoreRevsFile`.
+The "Contributing" section in `README.md` currently asks to "keep the code style consistent"
+without explaining how. It is replaced with specifics: `./gradlew spotlessApply` before
+committing, `./gradlew spotlessCheck detekt` to check, a mention of `.editorconfig` as the
+source of the rules, and a line about `blame.ignoreRevsFile`.
 
-## Ручні кроки після мерджу
+## Manual steps after merge
 
-Немає. Гейт `ci` уже налаштований як required status check і починає враховувати новий джоб
-автоматично.
+None. The `ci` gate is already configured as a required status check and automatically starts
+taking the new job into account.
