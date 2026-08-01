@@ -159,13 +159,14 @@ class DiagnosticsFindingsTest {
     // ------------------------------------------------------------------- F4
 
     /**
-     * F4: `findContinuousRange` recognises only ONE contiguous run (it starts
-     * from the arithmetic mean of the loaded keys). With a fragmented cache the
-     * mean falls into a gap, the function returns null, and the pager refetches
-     * a region that is already fully in memory.
+     * F4 (fixed): the pager used to recognise only ONE contiguous run of cached data
+     * (`findContinuousRange` started from the arithmetic mean of the loaded keys). With a fragmented
+     * cache the mean fell into a gap, the run came back as `null`, and a region already fully in
+     * memory was refetched. Every missing sub-range of the window is now computed separately, so a
+     * fully cached window costs no requests at all.
      */
     @Test
-    fun f4_fragmented_cache_refetches_data_already_in_memory() = runTest {
+    fun f4_fragmented_cache_is_not_refetched() = runTest {
         val calls = Calls()
         val p = pager(calls, preloadSize = 40, cacheSize = 1_000, latencyMs = 1)
         var latest: PagingData<Int>? = null
@@ -185,8 +186,8 @@ class DiagnosticsFindingsTest {
         latest.data[100]
         testScheduler.advanceUntilIdle()
 
-        // ...yet the pager fetches it all again (now as aligned chunks, but still redundantly)
-        calls.starts shouldBe listOf(100, 120, 80, 60)
+        // ...and nothing is fetched again: the second cluster no longer hides the first one
+        calls.starts shouldBe emptyList()
         job.cancel()
     }
 
