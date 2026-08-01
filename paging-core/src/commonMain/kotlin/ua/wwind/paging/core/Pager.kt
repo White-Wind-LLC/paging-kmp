@@ -262,8 +262,10 @@ public class Pager<T>(
         val fullRange = 0..<pagingData.size.coerceAtLeast(1)
         val coercedKey = key.coerceIn(fullRange)
 
-        // Find continuous range of already loaded data
-        val dataRange = findContinuousRange(pagingData.values)
+        // Positions already in memory. Every one of them is consulted individually, so a cache that
+        // fragmented into several clusters - which any jump to a far position produces - is still
+        // recognised in full.
+        val presentKeys = pagingData.values.keys
 
         // The full range we want to have loaded around the key
         val fetchFullRange = computeFetchFullRangeForKey(pagingData, key)
@@ -273,14 +275,13 @@ public class Pager<T>(
         val startFetchRange = gridCellAt(coercedKey, limit = fetchFullRange.last)
 
         // Chunks for the primary grid cell first
-        val prioritizedChunks: List<IntRange> = startFetchRange
-            .minus(dataRange)
-            .flatMap { it.gridChunks(limit = fetchFullRange.last) }
+        val prioritizedChunks: List<IntRange> =
+            startFetchRange.missingChunks(presentKeys, limit = fetchFullRange.last)
 
         val directionalChunks = computeDirectionalChunks(
             fetchFullRange = fetchFullRange,
             startFetchRange = startFetchRange,
-            dataRange = dataRange,
+            presentKeys = presentKeys,
             key = key,
             primaryDirection = primaryDirection,
         )
@@ -305,24 +306,16 @@ public class Pager<T>(
     private fun computeDirectionalChunks(
         fetchFullRange: IntRange,
         startFetchRange: IntRange,
-        dataRange: IntRange?,
+        presentKeys: Set<Int>,
         key: Int,
         primaryDirection: Direction,
     ): List<IntRange> {
-        // Compute ranges before and after the primary range
-        val beforeRangesRaw: List<IntRange> = (fetchFullRange.first..<startFetchRange.first)
-            .takeIf { startFetchRange.first > fetchFullRange.first }
-            ?.minus(dataRange) ?: emptyList()
-        val afterRangesRaw: List<IntRange> = ((startFetchRange.last + 1)..fetchFullRange.last)
-            .takeIf { startFetchRange.last < fetchFullRange.last }
-            ?.minus(dataRange) ?: emptyList()
-
-        // No edge extension is needed: grid cells are always a full loadSize, apart from the last one
-        // of the data set.
-        val beforeChunks: List<IntRange> = beforeRangesRaw
-            .flatMap { it.gridChunks(limit = fetchFullRange.last) }
-        val afterChunks: List<IntRange> = afterRangesRaw
-            .flatMap { it.gridChunks(limit = fetchFullRange.last) }
+        // Compute the still missing chunks before and after the primary range. No edge extension is
+        // needed: grid cells are always a full loadSize, apart from the last one of the data set.
+        val beforeChunks: List<IntRange> = (fetchFullRange.first..<startFetchRange.first)
+            .missingChunks(presentKeys, limit = fetchFullRange.last)
+        val afterChunks: List<IntRange> = ((startFetchRange.last + 1)..fetchFullRange.last)
+            .missingChunks(presentKeys, limit = fetchFullRange.last)
 
         return when (primaryDirection) {
             Direction.Increase -> afterChunks + beforeChunks
@@ -362,35 +355,6 @@ public class Pager<T>(
             }?.also {
                 loadStateFlow.value = LoadState.Success // Signal loading completed
             }
-    }
-
-    /**
-     * Finds the largest continuous range of loaded data
-     * This helps optimize loading by avoiding gaps in already loaded data
-     *
-     * Algorithm:
-     * 1. Find center of loaded data
-     * 2. Expand backwards while consecutive keys exist
-     * 3. Expand forwards while consecutive keys exist
-     *
-     * @param map Current loaded data map
-     * @return Continuous range or null if no data loaded
-     */
-    private fun findContinuousRange(map: Map<Int, T>): IntRange? {
-        val centerKey = map.keys.average().toInt()
-        if (centerKey !in map) return null
-
-        var startKey = centerKey
-        while (startKey - 1 in map) {
-            startKey--
-        }
-
-        var endKey = centerKey
-        while (endKey + 1 in map) {
-            endKey++
-        }
-
-        return startKey..endKey
     }
 
     private fun computeFetchFullRangeForKey(pagingData: PagingMap<T>, key: Int): IntRange {
@@ -437,6 +401,18 @@ public class Pager<T>(
         if (first > last) return emptyList()
         return (alignDown(first)..last step loadSize).map { start -> gridCellAt(start, limit) }
     }
+
+    /**
+     * The grid cells covering the positions of this range that are absent from [presentKeys].
+     *
+     * Each gap is resolved on its own, so a cache split into several clusters keeps all of them:
+     * only the holes between them are turned into chunks. Two gaps falling into the same cell yield
+     * that cell once.
+     */
+    private fun IntRange.missingChunks(presentKeys: Set<Int>, limit: Int): List<IntRange> =
+        computeMissingRanges(this, presentKeys)
+            .flatMap { it.gridChunks(limit = limit) }
+            .distinct()
 }
 
 /**
@@ -473,32 +449,6 @@ private class CacheAccumulator<T>(private var values: PersistentMap<Int, T>, pri
 }
 
 // Extension functions for range manipulation
-
-/**
- * Subtracts one range from another, returning remaining ranges
- * Used to calculate what data still needs to be loaded
- */
-private operator fun IntRange.minus(range: IntRange?): List<IntRange> = when {
-    range == null -> listOf(this)
-
-    first < range.first && last in range -> listOf(first..<range.first)
-
-    first in range && last > range.last -> listOf(range.last + 1..last)
-
-    first in range && last in range -> emptyList()
-
-    range.first in this && range.last in this -> listOf(
-        first..<range.first,
-        range.last + 1..last,
-    )
-
-    else -> listOf(this)
-}
-
-/**
- * Checks if this range completely contains another range
- */
-private operator fun IntRange.contains(range: IntRange): Boolean = range.first in this && range.last in this
 
 /**
  * Coerces this range to fit within another range

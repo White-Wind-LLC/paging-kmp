@@ -365,6 +365,42 @@ class PagerTest {
     }
 
     @Test
+    fun a_fragmented_cache_only_fetches_the_gaps_between_its_clusters() = runTest {
+        val starts = mutableListOf<Int>()
+        // A cache radius wide enough that nothing is ever evicted: whatever is refetched is
+        // refetched because the planner failed to see it, not because it was dropped.
+        val pager = Pager<Int>(loadSize = 20, preloadSize = 60, cacheSize = 1_000) { pos, size ->
+            flow {
+                starts += pos
+                val values: Map<Int, Int> = (pos..<pos + size).associateWith { it }
+                emit(DataPortion(totalSize = 1_000, values = values.toPersistentMap()))
+            }
+        }
+
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        this.testScheduler.advanceUntilIdle()
+
+        val visit: (Int) -> Unit = { key ->
+            latest!!.data[key]
+            this.testScheduler.advanceTimeBy(300)
+            this.testScheduler.advanceUntilIdle()
+        }
+
+        // Two clusters with a hole between them: 240..359 and 440..559
+        visit(500)
+        visit(300)
+        starts.clear()
+
+        // The window around 400 is 340..459, so only 360..439 is genuinely missing
+        visit(400)
+
+        starts.sorted() shouldBe listOf(360, 380, 400, 420)
+
+        job.cancel()
+    }
+
+    @Test
     fun rejects_a_cache_narrower_than_the_preload_window() {
         val error = shouldThrow<IllegalArgumentException> {
             Pager<Int>(loadSize = 20, preloadSize = 100, cacheSize = 40) { _, _ -> emptyFlow() }
