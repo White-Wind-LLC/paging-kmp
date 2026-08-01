@@ -23,16 +23,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Tune Gradle memory for CI runner
         run: |
@@ -54,7 +54,7 @@ jobs:
 
       - name: Upload analysis reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: static-analysis-reports
           path: '**/build/reports/detekt/**'
@@ -66,22 +66,22 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@v4
+        uses: gradle/actions/wrapper-validation@v5
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Cache Kotlin/Native toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
@@ -117,7 +117,7 @@ jobs:
       - name: Publish test report
         if: always()
         continue-on-error: true
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@v6
         with:
           report_paths: '**/build/test-results/**/TEST-*.xml'
           check_name: Test results (Linux)
@@ -127,7 +127,7 @@ jobs:
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports-linux
           path: |
@@ -141,19 +141,19 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Cache Kotlin/Native toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
@@ -184,7 +184,7 @@ jobs:
       - name: Publish test report
         if: always()
         continue-on-error: true
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@v6
         with:
           report_paths: '**/build/test-results/**/TEST-*.xml'
           check_name: Test results (Apple)
@@ -194,7 +194,7 @@ jobs:
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports-apple
           path: |
