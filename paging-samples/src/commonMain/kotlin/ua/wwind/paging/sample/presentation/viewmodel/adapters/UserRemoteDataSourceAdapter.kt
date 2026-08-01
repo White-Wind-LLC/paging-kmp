@@ -9,9 +9,7 @@ import ua.wwind.paging.sample.domain.repository.UserRemoteDataSource
 /**
  * Adapter to bridge [UserRemoteDataSource] into the core [RemoteDataSource] interface.
  */
-class UserRemoteDataSourceAdapter(
-    private val remote: UserRemoteDataSource,
-) : RemoteDataSource<User, Unit> {
+class UserRemoteDataSourceAdapter(private val remote: UserRemoteDataSource) : RemoteDataSource<User, Unit> {
 
     override suspend fun fetch(startPosition: Int, size: Int, query: Unit): DataPortion<User> {
         val page = remote.getUsers(startPosition, size)

@@ -20,9 +20,7 @@ interface ScrollbarAdapter {
     val thumbSizeRatio: Float
 }
 
-private class LazyListScrollbarAdapter(
-    private val state: LazyListState,
-) : ScrollbarAdapter {
+private class LazyListScrollbarAdapter(private val state: LazyListState) : ScrollbarAdapter {
     override val positionRatio: Float
         get() {
             val info = state.layoutInfo
@@ -53,9 +51,7 @@ private class LazyListScrollbarAdapter(
         }
 }
 
-private class ScrollStateScrollbarAdapter(
-    private val state: ScrollState,
-) : ScrollbarAdapter {
+private class ScrollStateScrollbarAdapter(private val state: ScrollState) : ScrollbarAdapter {
     override val positionRatio: Float
         get() {
             val maxValue = max(1, state.maxValue)

@@ -22,7 +22,7 @@ class FakeUserRemoteDataSource : UserRemoteDataSource {
             "John", "Jane", "Alice", "Bob", "Charlie", "Diana", "Edward", "Fiona",
             "George", "Helen", "Ivan", "Julia", "Kevin", "Laura", "Mike", "Nancy",
             "Oliver", "Patricia", "Quinn", "Rachel", "Steve", "Teresa", "Ulrich",
-            "Victoria", "William", "Xenia", "Yolanda", "Zachary", "Amanda", "Brian"
+            "Victoria", "William", "Xenia", "Yolanda", "Zachary", "Amanda", "Brian",
         )
 
         private val lastNames = listOf(
@@ -30,7 +30,7 @@ class FakeUserRemoteDataSource : UserRemoteDataSource {
             "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez",
             "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin",
             "Lee", "Perez", "Thompson", "White", "Harris", "Sanchez", "Clark",
-            "Ramirez", "Lewis", "Robinson", "Walker", "Young", "Allen", "King"
+            "Ramirez", "Lewis", "Robinson", "Walker", "Young", "Allen", "King",
         )
 
         private val domains = listOf("gmail.com", "yahoo.com", "outlook.com", "company.com")
@@ -50,29 +50,26 @@ class FakeUserRemoteDataSource : UserRemoteDataSource {
         return UserPage(users, TOTAL_USERS)
     }
 
+    private fun generateUsers(offset: Int, limit: Int): List<User> = (1..limit).map { index ->
+        val id = offset + index
+        val firstName = firstNames[id % firstNames.size]
+        val lastName = lastNames[(id / firstNames.size) % lastNames.size]
+        val email = "${firstName.lowercase()}.${lastName.lowercase()}$id@${domains[id % domains.size]}"
+        val role = roles[id % roles.size]
+        val avatarUrl = "https://api.dicebear.com/7.x/avataaars/svg?seed=$id"
+        val isActive = Random.nextBoolean()
+        val joinedDate = generateJoinDate(id)
 
-    private fun generateUsers(offset: Int, limit: Int): List<User> {
-        return (1..limit).map { index ->
-            val id = offset + index
-            val firstName = firstNames[id % firstNames.size]
-            val lastName = lastNames[(id / firstNames.size) % lastNames.size]
-            val email = "${firstName.lowercase()}.${lastName.lowercase()}$id@${domains[id % domains.size]}"
-            val role = roles[id % roles.size]
-            val avatarUrl = "https://api.dicebear.com/7.x/avataaars/svg?seed=$id"
-            val isActive = Random.nextBoolean()
-            val joinedDate = generateJoinDate(id)
-
-            User(
-                id = id,
-                firstName = firstName,
-                lastName = lastName,
-                email = email,
-                role = role,
-                avatarUrl = avatarUrl,
-                isActive = isActive,
-                joinedDate = joinedDate
-            )
-        }
+        User(
+            id = id,
+            firstName = firstName,
+            lastName = lastName,
+            email = email,
+            role = role,
+            avatarUrl = avatarUrl,
+            isActive = isActive,
+            joinedDate = joinedDate,
+        )
     }
 
     private fun generateJoinDate(seed: Int): String {

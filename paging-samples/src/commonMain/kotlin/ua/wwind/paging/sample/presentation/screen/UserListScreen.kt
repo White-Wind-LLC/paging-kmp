@@ -49,10 +49,14 @@ fun UserListScreen(
     val listState = rememberLazyListState()
     val cachedCount: Int? = if (useMediator && cachedCountFlow != null) {
         cachedCountFlow.collectAsState(initial = 0).value
-    } else null
+    } else {
+        null
+    }
     val lastMinSavedKey: Int? = if (useMediator && lastMinSavedKeyFlow != null) {
         lastMinSavedKeyFlow.collectAsState(initial = null).value
-    } else null
+    } else {
+        null
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -63,7 +67,7 @@ fun UserListScreen(
                 useMediator = useMediator,
                 onUseMediatorChange = onToggleUseMediator,
                 cachedCount = cachedCount,
-                lastMinSavedKey = lastMinSavedKey
+                lastMinSavedKey = lastMinSavedKey,
             )
         },
         floatingActionButton = {
@@ -72,12 +76,12 @@ fun UserListScreen(
                     Text("Refresh")
                 }
             }
-        }
+        },
     ) { contentPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(contentPadding)
+                .padding(contentPadding),
         ) {
             pagingData?.let { data ->
                 if (data.data.isEmpty()) {
@@ -93,13 +97,13 @@ fun UserListScreen(
                                 start = 16.dp,
                                 top = 16.dp,
                                 end = 32.dp, // Extra space for scrollbar
-                                bottom = 16.dp
+                                bottom = 16.dp,
                             ),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             items(
                                 count = data.data.size,
-                                key = { it }
+                                key = { it },
                             ) { index ->
                                 when (val userEntry = data.data[index]) {
                                     EntryState.Loading -> {
@@ -109,7 +113,7 @@ fun UserListScreen(
                                     is EntryState.Success -> {
                                         UserCard(
                                             user = userEntry.value,
-                                            modifier = Modifier.animateItem()
+                                            modifier = Modifier.animateItem(),
                                         )
                                     }
                                 }
@@ -120,10 +124,10 @@ fun UserListScreen(
                                 item {
                                     Box(
                                         modifier = Modifier.fillMaxWidth(),
-                                        contentAlignment = Alignment.Center
+                                        contentAlignment = Alignment.Center,
                                     ) {
                                         CircularProgressIndicator(
-                                            modifier = Modifier.padding(16.dp)
+                                            modifier = Modifier.padding(16.dp),
                                         )
                                     }
                                 }
@@ -137,7 +141,7 @@ fun UserListScreen(
                                 .align(Alignment.CenterEnd)
                                 .fillMaxHeight()
                                 .width(12.dp)
-                                .padding(end = 4.dp)
+                                .padding(end = 4.dp),
                         )
                     }
                 }
@@ -148,7 +152,7 @@ fun UserListScreen(
                     ErrorOverlay(
                         error = loadState.throwable,
                         onRetry = { data.retry(loadState.key) },
-                        modifier = Modifier.align(Alignment.Center)
+                        modifier = Modifier.align(Alignment.Center),
                     )
                 }
             }

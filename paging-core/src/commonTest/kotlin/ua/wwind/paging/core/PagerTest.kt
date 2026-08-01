@@ -41,7 +41,7 @@ class PagerTest {
                     val values: Map<Int, Int> = (pos..last).associateWith { it }
                     emit(DataPortion(totalSize = totalSize, values = values.toPersistentMap()))
                 }
-            }
+            },
         )
 
         // helper to advance virtual time sufficiently to pass debounce and complete loads
@@ -159,7 +159,7 @@ class PagerTest {
                     val values: Map<Int, Int> = (pos..last).associateWith { it }
                     emit(DataPortion(totalSize = 20, values = values.toPersistentMap()))
                 }
-            }
+            },
         )
 
         var latest: PagingData<Int>? = null

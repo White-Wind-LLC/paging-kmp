@@ -30,7 +30,7 @@ import kotlinx.collections.immutable.toPersistentMap
 public data class PagingMap<V>(
     val size: Int,
     val values: PersistentMap<Int, V>,
-    private val onGet: (key: Int) -> Unit
+    private val onGet: (key: Int) -> Unit,
 ) {
 
     public companion object {
@@ -38,10 +38,9 @@ public data class PagingMap<V>(
          * Creates an empty PagingMap with no data and no loading capability
          * Used as initial state or for testing
          */
-        public fun <V> empty(): PagingMap<V> {
-            return PagingMap(0, persistentMapOf()) {}
-        }
+        public fun <V> empty(): PagingMap<V> = PagingMap(0, persistentMapOf()) {}
     }
+
     /**
      * Transforms the values in this PagingMap using the provided transformation function.
      *
@@ -52,9 +51,13 @@ public data class PagingMap<V>(
      * @param transform Function to convert values from type V to type R
      * @return New PagingMap with transformed values
      */
-    public fun <R> mapValues(transform: (V) -> R): PagingMap<R> {
-        return PagingMap(size = size, values = values.mapValues { (_, value) -> transform(value) }.toPersistentMap(), onGet = onGet)
-    }
+    public fun <R> mapValues(transform: (V) -> R): PagingMap<R> = PagingMap(
+        size = size,
+        values = values.mapValues { (_, value) ->
+            transform(value)
+        }.toPersistentMap(),
+        onGet = onGet,
+    )
 
     /**
      * Access operator that returns the state of an item at the given position.
@@ -67,10 +70,10 @@ public data class PagingMap<V>(
      * @return EntryState.Success with the item if loaded, EntryState.Loading if not
      */
     public operator fun get(key: Int): EntryState<V> {
-        onGet(key)  // Notify Pager about data access - may trigger loading
+        onGet(key) // Notify Pager about data access - may trigger loading
         return values[key]?.let {
             EntryState.Success(it) // Item is loaded and available
-        } ?: EntryState.Loading    // Item is not loaded yet, loading may be triggered
+        } ?: EntryState.Loading // Item is not loaded yet, loading may be triggered
     }
 
     /**
@@ -80,9 +83,7 @@ public data class PagingMap<V>(
      *
      * @return true if the total dataset size is 0
      */
-    public fun isEmpty(): Boolean {
-        return size == 0
-    }
+    public fun isEmpty(): Boolean = size == 0
 
     /**
      * Gets the smallest position that has been loaded into memory
@@ -90,9 +91,7 @@ public data class PagingMap<V>(
      *
      * @return The minimum loaded position, or -1 if no data is loaded
      */
-    public fun firstKey(): Int {
-        return values.keys.minOfOrNull { it } ?: -1
-    }
+    public fun firstKey(): Int = values.keys.minOfOrNull { it } ?: -1
 
     /**
      * Gets the largest position that has been loaded into memory
@@ -100,7 +99,5 @@ public data class PagingMap<V>(
      *
      * @return The maximum loaded position, or -1 if no data is loaded
      */
-    public fun lastKey(): Int {
-        return values.keys.maxOfOrNull { it } ?: -1
-    }
+    public fun lastKey(): Int = values.keys.maxOfOrNull { it } ?: -1
 }

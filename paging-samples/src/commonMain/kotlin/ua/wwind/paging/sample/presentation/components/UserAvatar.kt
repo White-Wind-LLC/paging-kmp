@@ -19,11 +19,7 @@ import androidx.compose.ui.unit.dp
  * Reusable avatar component with activity status indicator
  */
 @Composable
-fun UserAvatar(
-    avatarUrl: String,
-    isActive: Boolean,
-    modifier: Modifier = Modifier,
-) {
+fun UserAvatar(avatarUrl: String, isActive: Boolean, modifier: Modifier = Modifier) {
     Box(modifier = modifier) {
         // Avatar circle with initials (placeholder for actual image loading)
         Box(
@@ -34,9 +30,9 @@ fun UserAvatar(
                 .border(
                     width = if (isActive) 2.dp else 0.dp,
                     color = if (isActive) Color.Green else Color.Transparent,
-                    shape = CircleShape
+                    shape = CircleShape,
                 ),
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.Center,
         ) {
             // For now, show first letter of hash as placeholder
             // In real app, you would load image from avatarUrl
@@ -44,7 +40,7 @@ fun UserAvatar(
                 text = avatarUrl.hashCode().toString().first().toString(),
                 color = MaterialTheme.colorScheme.onPrimary,
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
             )
         }
 
@@ -55,7 +51,7 @@ fun UserAvatar(
                     .size(12.dp)
                     .clip(CircleShape)
                     .background(Color.Green)
-                    .align(Alignment.BottomEnd)
+                    .align(Alignment.BottomEnd),
             )
         }
     }

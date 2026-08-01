@@ -38,17 +38,14 @@ import ua.wwind.paging.sample.scrollbar.VerticalScrollbar
 import ua.wwind.paging.sample.scrollbar.rememberScrollbarAdapter
 
 @Composable
-fun StreamingUserListScreen(
-    viewModel: StreamingUserListViewModel,
-    modifier: Modifier = Modifier,
-) {
+fun StreamingUserListScreen(viewModel: StreamingUserListViewModel, modifier: Modifier = Modifier) {
     val pagingData by viewModel.pagingFlow.collectAsState(initial = null)
 
     Row(modifier = modifier.fillMaxSize()) {
         // Editor pane
         Column(
             modifier = Modifier.weight(1f).fillMaxHeight().padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("Editor", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -96,9 +93,12 @@ fun StreamingUserListScreen(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(
-                                start = 16.dp, top = 16.dp, end = 32.dp, bottom = 16.dp
+                                start = 16.dp,
+                                top = 16.dp,
+                                end = 32.dp,
+                                bottom = 16.dp,
                             ),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             items(count = data.data.size, key = { it }) { index ->
                                 when (val entry = data.data[index]) {
@@ -116,7 +116,7 @@ fun StreamingUserListScreen(
                         }
                         VerticalScrollbar(
                             adapter = rememberScrollbarAdapter(listState),
-                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(12.dp)
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(12.dp),
                         )
                     }
                 }
@@ -125,7 +125,7 @@ fun StreamingUserListScreen(
                     ErrorOverlay(
                         error = loadState.throwable,
                         onRetry = { data.retry(loadState.key) },
-                        modifier = Modifier.align(Alignment.Center)
+                        modifier = Modifier.align(Alignment.Center),
                     )
                 }
             }

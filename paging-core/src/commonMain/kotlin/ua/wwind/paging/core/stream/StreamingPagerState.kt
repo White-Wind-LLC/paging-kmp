@@ -82,7 +82,7 @@ internal class StreamingPagerState<T>(
                     PagingMap(
                         size = current.size,
                         values = merged,
-                        onGet = ::onGet
+                        onGet = ::onGet,
                     )
                 }
             }
@@ -109,7 +109,9 @@ internal class StreamingPagerState<T>(
             try {
                 logger.d { "openStream: start collecting range=$range size=$fetchSize" }
                 readPortion(range.first, fetchSize).collect { values ->
-                    logger.d { "onPortion(range=$range, count=${values.size}, keys=${values.keys.minOrNull()}..${values.keys.maxOrNull()})" }
+                    logger.d {
+                        "onPortion(range=$range, count=${values.size}, keys=${values.keys.minOrNull()}..${values.keys.maxOrNull()})"
+                    }
                     onPortion(values)
                     rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
                         current.orEmpty() + (range to LoadState.Success)
@@ -143,7 +145,7 @@ internal class StreamingPagerState<T>(
             PagingMap(
                 size = newTotal,
                 values = prunedValues,
-                onGet = ::onGet
+                onGet = ::onGet,
             )
         }
 
@@ -213,7 +215,11 @@ internal class StreamingPagerState<T>(
             val toCloseNow = activeStreams.keys.filter { r ->
                 distanceBeyondWindow(window, r) > config.closeThreshold
             }
-            if (toCloseNow.isNotEmpty()) logger.d { "closing: $toCloseNow (window=$window, threshold>${config.closeThreshold})" }
+            if (toCloseNow.isNotEmpty()) {
+                logger.d {
+                    "closing: $toCloseNow (window=$window, threshold>${config.closeThreshold})"
+                }
+            }
             toCloseNow.forEach { r ->
                 activeStreams.remove(r)?.cancel(CancellationException("StreamingPager: window shifted"))
                 rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
@@ -251,15 +257,21 @@ internal class StreamingPagerState<T>(
         }
 
         val anchor = targetChunks.firstOrNull { key in it } ?: targetChunks.firstOrNull()
-        val sortedToOpen = if (anchor == null) toOpen else toOpen.sortedWith(compareBy<IntRange> {
-            val delta = it.first - anchor.first
-            when {
-                directionForward && delta >= 0 -> delta
-                directionForward && delta < 0 -> Int.MAX_VALUE / 2 + kotlin.math.abs(delta)
-                !directionForward && delta <= 0 -> kotlin.math.abs(delta)
-                else -> Int.MAX_VALUE / 2 + delta
-            }
-        })
+        val sortedToOpen = if (anchor == null) {
+            toOpen
+        } else {
+            toOpen.sortedWith(
+                compareBy<IntRange> {
+                    val delta = it.first - anchor.first
+                    when {
+                        directionForward && delta >= 0 -> delta
+                        directionForward && delta < 0 -> Int.MAX_VALUE / 2 + kotlin.math.abs(delta)
+                        !directionForward && delta <= 0 -> kotlin.math.abs(delta)
+                        else -> Int.MAX_VALUE / 2 + delta
+                    }
+                },
+            )
+        }
 
         sortedToOpen.forEach { range -> openStream(range, scope) }
 

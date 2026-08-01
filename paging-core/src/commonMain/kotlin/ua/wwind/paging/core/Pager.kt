@@ -42,7 +42,7 @@ public class Pager<T>(
     private val loadSize: Int = 20,
     private val preloadSize: Int = 60,
     private val cacheSize: Int = 100,
-    private val readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>
+    private val readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>,
 ) {
     // External refresh trigger (fan-out to active collections)
     private val refreshRequests: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 64)
@@ -121,7 +121,7 @@ public class Pager<T>(
                             mutex = mutex,
                             key = key,
                             primaryDirection = direction,
-                            onGet = ::onGet
+                            onGet = ::onGet,
                         )
                     }
                     currentLoadJob = job
@@ -164,7 +164,7 @@ public class Pager<T>(
         mutex: Mutex,
         key: Int,
         primaryDirection: Direction,
-        onGet: (Int) -> Unit
+        onGet: (Int) -> Unit,
     ) = mutex.withLock {
         try {
             val pagingData = _data.value
@@ -181,13 +181,14 @@ public class Pager<T>(
 
             // Calculate the full range we want to have loaded around the key
             val fetchFullRange =
-                if (pagingData.size > 0)
-                // Normal case: preload around the requested position
+                if (pagingData.size > 0) {
+                    // Normal case: preload around the requested position
                     ((coercedKey - preloadSize)..<coercedKey + preloadSize)
                         .coerceIn(fullRange)
-                else
-                // Initial load case: load from beginning
+                } else {
+                    // Initial load case: load from beginning
                     0..<loadSize
+                }
 
             // The planned range is tracked at scheduling time; no need to update here
             // Determine the primary range to load first (centered around the requested position)
@@ -269,7 +270,7 @@ public class Pager<T>(
                                     PagingMap(
                                         size = portion.totalSize,
                                         values = portion.values,
-                                        onGet = onGet
+                                        onGet = onGet,
                                     )
                                 } else {
                                     val updatedValues = dataMap.mergeIntoCache(
@@ -282,16 +283,14 @@ public class Pager<T>(
                                     PagingMap(
                                         size = portion.totalSize,
                                         values = updatedValues,
-                                        onGet = onGet
+                                        onGet = onGet,
                                     )
                                 }
                             }
                         }
-
                 }?.also {
                     _loadState.value = LoadState.Success // Signal loading completed
                 }
-
         } catch (e: CancellationException) {
             // Preserve cancellation for proper coroutine cleanup
             throw e
@@ -334,11 +333,12 @@ public class Pager<T>(
         val fullRange = 0..<pagingData.size.coerceAtLeast(1)
         val coercedKey = key.coerceIn(fullRange)
 
-        return if (pagingData.size > 0)
+        return if (pagingData.size > 0) {
             ((coercedKey - preloadSize)..<coercedKey + preloadSize)
                 .coerceIn(fullRange)
-        else
+        } else {
             0..<loadSize
+        }
     }
 }
 
@@ -348,43 +348,39 @@ public class Pager<T>(
  * Subtracts one range from another, returning remaining ranges
  * Used to calculate what data still needs to be loaded
  */
-private operator fun IntRange.minus(range: IntRange?): List<IntRange> {
-    return when {
-        range == null -> listOf(this)
-        first < range.first && last in range -> listOf(first..<range.first)
-        first in range && last > range.last -> listOf(range.last + 1..last)
-        first in range && last in range -> emptyList()
-        range.first in this && range.last in this -> listOf(
-            first..<range.first,
-            range.last + 1..last
-        )
+private operator fun IntRange.minus(range: IntRange?): List<IntRange> = when {
+    range == null -> listOf(this)
 
-        else -> listOf(this)
-    }
+    first < range.first && last in range -> listOf(first..<range.first)
+
+    first in range && last > range.last -> listOf(range.last + 1..last)
+
+    first in range && last in range -> emptyList()
+
+    range.first in this && range.last in this -> listOf(
+        first..<range.first,
+        range.last + 1..last,
+    )
+
+    else -> listOf(this)
 }
 
 /**
  * Checks if this range completely contains another range
  */
-private operator fun IntRange.contains(range: IntRange): Boolean {
-    return range.first in this && range.last in this
-}
+private operator fun IntRange.contains(range: IntRange): Boolean = range.first in this && range.last in this
 
 /**
  * Coerces this range to fit within another range
  */
-private fun IntRange.coerceIn(range: IntRange): IntRange {
-    return first.coerceIn(range)..last.coerceIn(range)
-}
+private fun IntRange.coerceIn(range: IntRange): IntRange = first.coerceIn(range)..last.coerceIn(range)
 
 /**
  * Splits a range into smaller chunks of specified size
  * Used to break large loading ranges into manageable requests
  */
-private fun IntRange.chunkedRanges(size: Int): List<IntRange> {
-    return (first..last step size)
-        .map { start -> start..(start + size - 1).coerceAtMost(last) }
-}
+private fun IntRange.chunkedRanges(size: Int): List<IntRange> = (first..last step size)
+    .map { start -> start..(start + size - 1).coerceAtMost(last) }
 
 /**
  * Expands a range to reach the specified size, up to the limit

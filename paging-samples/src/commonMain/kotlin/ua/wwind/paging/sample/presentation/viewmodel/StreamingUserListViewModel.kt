@@ -22,7 +22,7 @@ class StreamingUserListViewModel(
             cacheSize = cacheSize,
         ),
         readTotal = { store.totalFlow() },
-        readPortion = { start, size -> store.portionMapFlow(start, size) }
+        readPortion = { start, size -> store.portionMapFlow(start, size) },
     )
 
     val pagingFlow: Flow<PagingData<User>> = pager.flow

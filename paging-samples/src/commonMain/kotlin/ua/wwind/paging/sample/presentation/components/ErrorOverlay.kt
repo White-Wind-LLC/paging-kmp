@@ -19,47 +19,43 @@ import androidx.compose.ui.unit.dp
  * Component for displaying error states with retry functionality
  */
 @Composable
-fun ErrorOverlay(
-    error: Throwable,
-    onRetry: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+fun ErrorOverlay(error: Throwable, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier.padding(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
+            containerColor = MaterialTheme.colorScheme.errorContainer,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
     ) {
         Column(
             modifier = Modifier.padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
                 text = "⚠️",
-                style = MaterialTheme.typography.displaySmall
+                style = MaterialTheme.typography.displaySmall,
             )
 
             Text(
                 text = "Error Loading Data",
                 style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onErrorContainer
+                color = MaterialTheme.colorScheme.onErrorContainer,
             )
 
             Text(
                 text = error.message ?: "An unknown error occurred",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
             )
 
             Button(
                 onClick = onRetry,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError
-                )
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
             ) {
                 Text("Retry")
             }

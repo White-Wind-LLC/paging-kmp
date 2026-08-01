@@ -15,31 +15,29 @@ import androidx.compose.ui.unit.dp
  * Component shown when no users are available
  */
 @Composable
-fun EmptyState(
-    modifier: Modifier = Modifier,
-) {
+fun EmptyState(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier.padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // Using a text emoji as placeholder for icon
         Text(
             text = "👥",
-            style = MaterialTheme.typography.displayMedium
+            style = MaterialTheme.typography.displayMedium,
         )
 
         Text(
             text = "No users found",
             style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
         )
 
         Text(
             text = "There are no users to display at the moment.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
         )
     }
 }
