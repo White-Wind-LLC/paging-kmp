@@ -20,7 +20,6 @@ import ua.wwind.paging.core.LoadState
 import ua.wwind.paging.core.PagingMap
 import ua.wwind.paging.core.mergeIntoCache
 import ua.wwind.paging.core.pruneToRange
-import kotlin.math.abs
 
 internal class StreamingPagerState<T>(
     val config: StreamingPagerConfig,
@@ -164,38 +163,22 @@ internal class StreamingPagerState<T>(
     }
 
     /**
-     * Marks all known ranges as failed due to a `readTotal()` error.
+     * Puts every known range into the state [stateFor] returns for it.
      *
-     * Keeps the flow alive while propagating a global error state to the UI.
+     * Used to propagate a global `readTotal()` outcome - an error, or the retry that follows it -
+     * to the UI without tearing the flow down. When nothing is known yet the first page stands in,
+     * so that an initial failure is still visible.
      */
-    suspend fun onTotalError(throwable: Throwable) = mutex.withLock {
+    suspend fun markKnownRanges(stateFor: (IntRange) -> LoadState) = mutex.withLock {
         val ranges = (rangeLoadStates.value.orEmpty().keys + activeStreams.keys).toSet()
-        val errorRanges = ranges.ifEmpty {
+        val knownRanges = ranges.ifEmpty {
             setOf(0..<config.loadSize)
         }
         rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
-            current.orEmpty() + errorRanges.associateWith { range -> LoadState.Error(throwable, range.first) }
+            current.orEmpty() + knownRanges.associateWith(stateFor)
         }
     }
 
-    /**
-     * Resets all known ranges to loading state when retrying `readTotal()`.
-     *
-     * Used to reflect that a global retry is in progress after a total error.
-     */
-    suspend fun onTotalRetryStart() = mutex.withLock {
-        val ranges = (rangeLoadStates.value.orEmpty().keys + activeStreams.keys).toSet()
-        val retryRanges = ranges.ifEmpty {
-            setOf(0..<config.loadSize)
-        }
-        rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
-            current.orEmpty() + retryRanges.associateWith { LoadState.Loading }
-        }
-    }
-
-    // Pre-existing complexity, left as-is when detekt was introduced so that the tooling change
-    // stays behaviour-neutral. Splitting this up is worth doing on its own terms.
-    @Suppress("LongMethod", "CyclomaticComplexMethod")
     suspend fun tryAdjustStreamsForKey(key: Int, scope: CoroutineScope) = mutex.withLock {
         logger.d { "tryAdjustStreamsForKey: key=$key" }
         cleanupInactiveStreamsLocked()
@@ -205,56 +188,48 @@ internal class StreamingPagerState<T>(
         val totalSize = data.value.size
         logger.d { "adjust: key=$key last=$lastReadKey total=$totalSize forward=$directionForward" }
 
-        val targetChunks: List<IntRange> = if (totalSize == 0) {
-            listOf(0..<config.loadSize)
-        } else {
-            val windowForKeyAligned = computeWindowForKeyAligned(key, totalSize, config)
-            val keepers = activeStreams.keys.filter { it.intersects(windowForKeyAligned) }
-            val baseStart = keepers.minByOrNull { abs(it.first - key) }?.first
-                ?: alignedChunkStartForKey(key, baseStart = 0, config)
+        val plan = planStreamWindow(activeStreams.keys, key, totalSize, config)
+        plan.window?.let { window -> closeStreamsOutsideWindowLocked(window) }
+        openMissingStreamsLocked(plan.chunks, key, directionForward, scope)
 
-            val centerChunk = alignedChunkContaining(key, baseStart, totalSize, config)
-            val window = computeWindowAroundCenter(centerChunk, totalSize, config)
+        previousKey = lastReadKey
+        lastReadKey = key
+    }
 
-            val toCloseNow = activeStreams.keys.filter { r ->
-                distanceBeyondWindow(window, r) > config.closeThreshold
-            }
-            if (toCloseNow.isNotEmpty()) {
-                logger.d {
-                    "closing: $toCloseNow (window=$window, threshold>${config.closeThreshold})"
-                }
-            }
-            toCloseNow.forEach { r ->
-                activeStreams.remove(r)?.cancel(CancellationException("StreamingPager: window shifted"))
-                rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
-                    current?.filterNot { it.key == r }
-                }
-            }
-
-            val forward = mutableListOf<IntRange>().apply {
-                var start = centerChunk.first + config.loadSize
-                while (start <= window.last) {
-                    val end = (start + config.loadSize - 1).coerceAtMost(totalSize - 1)
-                    add(start..end)
-                    start += config.loadSize
-                }
-            }
-
-            val backward = buildList {
-                var start = centerChunk.first - config.loadSize
-                while (start + config.loadSize - 1 >= window.first && start >= 0) {
-                    val end = (start + config.loadSize - 1).coerceAtMost(totalSize - 1)
-                    add(start..end)
-                    start -= config.loadSize
-                }
-            }.reversed()
-
-            (backward + listOf(centerChunk) + forward)
+    /**
+     * Cancels the streams that sit further than [StreamingPagerConfig.closeThreshold] outside
+     * [window]. Expects [mutex] to be held.
+     */
+    private fun closeStreamsOutsideWindowLocked(window: IntRange) {
+        val toCloseNow = activeStreams.keys.filter { r ->
+            distanceBeyondWindow(window, r) > config.closeThreshold
         }
+        if (toCloseNow.isNotEmpty()) {
+            logger.d {
+                "closing: $toCloseNow (window=$window, threshold>${config.closeThreshold})"
+            }
+        }
+        toCloseNow.forEach { r ->
+            activeStreams.remove(r)?.cancel(CancellationException("StreamingPager: window shifted"))
+            rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
+                current?.filterNot { it.key == r }
+            }
+        }
+    }
 
+    /**
+     * Opens the chunks of [targetChunks] that are not streaming yet, nearest to [key] first and
+     * favouring the scroll direction. Expects [mutex] to be held.
+     */
+    private fun openMissingStreamsLocked(
+        targetChunks: List<IntRange>,
+        key: Int,
+        directionForward: Boolean,
+        scope: CoroutineScope,
+    ) {
         val toOpen = targetChunks.filter { it !in activeStreams }
-        if (toOpen.isNotEmpty()) logger.d { "opening missing ranges: $toOpen" }
         if (toOpen.isNotEmpty()) {
+            logger.d { "opening missing ranges: $toOpen" }
             rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
                 current.orEmpty() + toOpen.associateWith { LoadState.Loading }
             }
@@ -264,23 +239,10 @@ internal class StreamingPagerState<T>(
         val sortedToOpen = if (anchor == null) {
             toOpen
         } else {
-            toOpen.sortedWith(
-                compareBy<IntRange> {
-                    val delta = it.first - anchor.first
-                    when {
-                        directionForward && delta >= 0 -> delta
-                        directionForward && delta < 0 -> Int.MAX_VALUE / 2 + kotlin.math.abs(delta)
-                        !directionForward && delta <= 0 -> kotlin.math.abs(delta)
-                        else -> Int.MAX_VALUE / 2 + delta
-                    }
-                },
-            )
+            toOpen.sortedBy { openOrderKey(it, anchor, directionForward) }
         }
 
         sortedToOpen.forEach { range -> openStream(range, scope) }
-
-        previousKey = lastReadKey
-        lastReadKey = key
     }
 
     fun cancelActiveStreams() {

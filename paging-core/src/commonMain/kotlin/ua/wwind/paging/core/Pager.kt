@@ -152,15 +152,11 @@ public class Pager<T>(
      * Main loading algorithm that determines what data to fetch and manages cache
      *
      * Algorithm overview:
-     * 1. Calculate fetch ranges around the requested position
-     * 2. Identify missing data that needs to be loaded
-     * 3. Load data in chunks, prioritizing closest to requested position
-     * 4. Update cache, removing items outside cache range
-     * 5. Handle errors gracefully with retry capability
+     * 1. [planLoad] calculates which ranges are missing around the requested position and in
+     *    which order they should be fetched
+     * 2. [runLoads] fetches them, updating the cache and the load state as portions arrive
+     * 3. Errors are converted into [LoadState.Error] so the caller can retry
      */
-    // Pre-existing complexity, left as-is when detekt was introduced so that the tooling change
-    // stays behaviour-neutral. Splitting this up is worth doing on its own terms.
-    @Suppress("LongMethod", "CyclomaticComplexMethod")
     private suspend fun loadPortion(
         dataFlow: MutableStateFlow<PagingMap<T>>,
         loadStateFlow: MutableStateFlow<LoadState>,
@@ -171,130 +167,14 @@ public class Pager<T>(
     ) = mutex.withLock {
         try {
             val pagingData = dataFlow.value
-
-            // Calculate the valid range of positions
-            val fullRange = 0..<pagingData.size.coerceAtLeast(1)
-            val coercedKey = key.coerceIn(fullRange)
-
-            // Current loaded data
-            val currentDataMap = pagingData.values
-
-            // Find continuous range of already loaded data
-            val dataRange = findContinuousRange(currentDataMap)
-
-            // Calculate the full range we want to have loaded around the key
-            val fetchFullRange =
-                if (pagingData.size > 0) {
-                    // Normal case: preload around the requested position
-                    ((coercedKey - preloadSize)..<coercedKey + preloadSize)
-                        .coerceIn(fullRange)
-                } else {
-                    // Initial load case: load from beginning
-                    0..<loadSize
-                }
-
-            // The planned range is tracked at scheduling time; no need to update here
-            // Determine the primary range to load first (centered around the requested position)
-            val startFetchRange =
-                ((coercedKey - loadSize / 2)..<(coercedKey - loadSize / 2 + loadSize))
-                    .coerceIn(fetchFullRange)
-                    .expandTo(size = loadSize, limit = fetchFullRange.last)
-
-            // Chunks for the primary centered range first
-            val prioritizedChunks: List<IntRange> = startFetchRange
-                .minus(dataRange)
-                .flatMap { it.chunkedRanges(loadSize) }
-
-            // Compute ranges before and after the primary range
-            val beforeRangesRaw: List<IntRange> = (fetchFullRange.first..<startFetchRange.first)
-                .takeIf { startFetchRange.first > fetchFullRange.first }
-                ?.minus(dataRange) ?: emptyList()
-            val afterRangesRaw: List<IntRange> = ((startFetchRange.last + 1)..fetchFullRange.last)
-                .takeIf { startFetchRange.last < fetchFullRange.last }
-                ?.minus(dataRange) ?: emptyList()
-
-            // Extend edge pieces to a full load when they touch fetchFullRange boundaries
-            fun extendEdges(pieces: List<IntRange>): List<IntRange> = pieces.map { piece ->
-                val pieceCount = piece.count()
-                when {
-                    piece.first == fetchFullRange.first && pieceCount < loadSize -> {
-                        val start = (piece.first - (loadSize - pieceCount)).coerceAtLeast(0)
-                        start..piece.last
-                    }
-
-                    piece.last == fetchFullRange.last && pieceCount < loadSize -> {
-                        val end = piece.last + (loadSize - pieceCount)
-                        piece.first..end
-                    }
-
-                    else -> piece
-                }
-            }
-
-            val beforeChunks: List<IntRange> = extendEdges(beforeRangesRaw)
-                .flatMap { it.chunkedRanges(loadSize) }
-            val afterChunks: List<IntRange> = extendEdges(afterRangesRaw)
-                .flatMap { it.chunkedRanges(loadSize) }
-
-            // Directional prioritization: when moving up (new key < old), load increasing
-            // indices first; else decreasing first
-            val directionalChunks: List<IntRange> = when (primaryDirection) {
-                Direction.Increase -> afterChunks + beforeChunks
-                Direction.Decrease -> beforeChunks + afterChunks
-            }.sortedBy { abs(it.first - key) }
-
-            // Build ordered list of ranges to load
-            val enqueue = prioritizedChunks + directionalChunks
-
-            // Apply cache size limit (immutable). We must avoid mutating the same Map instance
-            // across emissions, otherwise StateFlow's equality check can suppress updates.
-            // Do not constrain cacheRange by the (possibly unknown) fullRange; total size may be 0 initially
-            // and will be corrected by remote portions. We keep absolute window around the key.
-            val cacheRange = (coercedKey - cacheSize)..<(coercedKey + cacheSize)
-            var dataMap: PersistentMap<Int, T> = currentDataMap.pruneToRange(cacheRange)
-            // `cacheRange` is fixed for this call, so once `dataMap` is pruned every later merge only
-            // has to write its own delta. Replacing the map wholesale on a total change breaks that.
-            var dataMapPruned = true
-
-            // Execute loading operations
-            enqueue
-                .toNonEmptyListOrNull() // Only proceed if there's something to load
-                ?.also {
-                    loadStateFlow.value = LoadState.Loading // Signal loading started
-                }?.onEach { fetchRange ->
-                    // Load each range
-                    val loadSize = fetchRange.last - fetchRange.first + 1
-                    readData(fetchRange.first, loadSize)
-                        .collect { portion ->
-                            // Build a new immutable map snapshot for each emission to ensure StateFlow emits
-                            dataFlow.update { currentData ->
-                                if (currentData.size != portion.totalSize) {
-                                    dataMap = portion.values
-                                    dataMapPruned = false
-                                    PagingMap(
-                                        size = portion.totalSize,
-                                        values = portion.values,
-                                        onGet = onGet,
-                                    )
-                                } else {
-                                    val updatedValues = dataMap.mergeIntoCache(
-                                        incoming = portion.values,
-                                        cacheRange = cacheRange,
-                                        pruneExisting = !dataMapPruned,
-                                    )
-                                    dataMap = updatedValues
-                                    dataMapPruned = true
-                                    PagingMap(
-                                        size = portion.totalSize,
-                                        values = updatedValues,
-                                        onGet = onGet,
-                                    )
-                                }
-                            }
-                        }
-                }?.also {
-                    loadStateFlow.value = LoadState.Success // Signal loading completed
-                }
+            val plan = planLoad(pagingData, key, primaryDirection)
+            runLoads(
+                plan = plan,
+                cachedValues = pagingData.values,
+                dataFlow = dataFlow,
+                loadStateFlow = loadStateFlow,
+                onGet = onGet,
+            )
         } catch (e: CancellationException) {
             // Preserve cancellation for proper coroutine cleanup
             throw e
@@ -302,6 +182,115 @@ public class Pager<T>(
             // Convert other exceptions to LoadState.Error for retry handling
             loadStateFlow.value = LoadState.Error(e, key)
         }
+    }
+
+    /**
+     * Works out what still has to be fetched around [key] and in which order.
+     *
+     * The range closest to [key] comes first, the rest follows [primaryDirection]; already loaded
+     * positions are skipped.
+     */
+    private fun planLoad(pagingData: PagingMap<T>, key: Int, primaryDirection: Direction): LoadPlan {
+        // Calculate the valid range of positions
+        val fullRange = 0..<pagingData.size.coerceAtLeast(1)
+        val coercedKey = key.coerceIn(fullRange)
+
+        // Find continuous range of already loaded data
+        val dataRange = findContinuousRange(pagingData.values)
+
+        // The full range we want to have loaded around the key
+        val fetchFullRange = computeFetchFullRangeForKey(pagingData, key)
+
+        // The planned range is tracked at scheduling time; no need to update here
+        // Determine the primary range to load first (centered around the requested position)
+        val startFetchRange =
+            ((coercedKey - loadSize / 2)..<(coercedKey - loadSize / 2 + loadSize))
+                .coerceIn(fetchFullRange)
+                .expandTo(size = loadSize, limit = fetchFullRange.last)
+
+        // Chunks for the primary centered range first
+        val prioritizedChunks: List<IntRange> = startFetchRange
+            .minus(dataRange)
+            .flatMap { it.chunkedRanges(loadSize) }
+
+        val directionalChunks = computeDirectionalChunks(
+            fetchFullRange = fetchFullRange,
+            startFetchRange = startFetchRange,
+            dataRange = dataRange,
+            key = key,
+            primaryDirection = primaryDirection,
+        )
+
+        // Do not constrain cacheRange by the (possibly unknown) fullRange; total size may be 0 initially
+        // and will be corrected by remote portions. We keep absolute window around the key.
+        return LoadPlan(
+            chunks = prioritizedChunks + directionalChunks,
+            cacheRange = (coercedKey - cacheSize)..<(coercedKey + cacheSize),
+        )
+    }
+
+    /**
+     * Orders the ranges surrounding the primary one: when moving up (new key < old), increasing
+     * indices are loaded first, otherwise decreasing ones.
+     */
+    private fun computeDirectionalChunks(
+        fetchFullRange: IntRange,
+        startFetchRange: IntRange,
+        dataRange: IntRange?,
+        key: Int,
+        primaryDirection: Direction,
+    ): List<IntRange> {
+        // Compute ranges before and after the primary range
+        val beforeRangesRaw: List<IntRange> = (fetchFullRange.first..<startFetchRange.first)
+            .takeIf { startFetchRange.first > fetchFullRange.first }
+            ?.minus(dataRange) ?: emptyList()
+        val afterRangesRaw: List<IntRange> = ((startFetchRange.last + 1)..fetchFullRange.last)
+            .takeIf { startFetchRange.last < fetchFullRange.last }
+            ?.minus(dataRange) ?: emptyList()
+
+        val beforeChunks: List<IntRange> = extendEdges(beforeRangesRaw, fetchFullRange, loadSize)
+            .flatMap { it.chunkedRanges(loadSize) }
+        val afterChunks: List<IntRange> = extendEdges(afterRangesRaw, fetchFullRange, loadSize)
+            .flatMap { it.chunkedRanges(loadSize) }
+
+        return when (primaryDirection) {
+            Direction.Increase -> afterChunks + beforeChunks
+            Direction.Decrease -> beforeChunks + afterChunks
+        }.sortedBy { abs(it.first - key) }
+    }
+
+    /**
+     * Fetches every range of [plan] in order, publishing each portion as it arrives.
+     *
+     * [cachedValues] is the cache snapshot the merges start from; it is pruned to the plan's cache
+     * window before the first fetch.
+     */
+    private suspend fun runLoads(
+        plan: LoadPlan,
+        cachedValues: PersistentMap<Int, T>,
+        dataFlow: MutableStateFlow<PagingMap<T>>,
+        loadStateFlow: MutableStateFlow<LoadState>,
+        onGet: (Int) -> Unit,
+    ) {
+        // Apply cache size limit (immutable). We must avoid mutating the same Map instance
+        // across emissions, otherwise StateFlow's equality check can suppress updates.
+        val cache = CacheAccumulator(cachedValues.pruneToRange(plan.cacheRange), plan.cacheRange)
+
+        plan.chunks
+            .toNonEmptyListOrNull() // Only proceed if there's something to load
+            ?.also {
+                loadStateFlow.value = LoadState.Loading // Signal loading started
+            }?.onEach { fetchRange ->
+                // Load each range
+                val fetchSize = fetchRange.last - fetchRange.first + 1
+                readData(fetchRange.first, fetchSize)
+                    .collect { portion ->
+                        // Build a new immutable map snapshot for each emission to ensure StateFlow emits
+                        dataFlow.update { currentData -> cache.next(currentData, portion, onGet) }
+                    }
+            }?.also {
+                loadStateFlow.value = LoadState.Success // Signal loading completed
+            }
     }
 
     /**
@@ -343,6 +332,60 @@ public class Pager<T>(
         } else {
             0..<loadSize
         }
+    }
+}
+
+/**
+ * Ranges a single [Pager.loadPortion] call has to fetch, in the order they should be requested,
+ * together with the cache window the result is constrained to.
+ */
+private data class LoadPlan(val chunks: List<IntRange>, val cacheRange: IntRange)
+
+/**
+ * Builds the successive cache snapshots of one [Pager.loadPortion] call.
+ *
+ * [cacheRange] is fixed for the duration of a call, so once the values have been pruned to it every
+ * later merge only has to write its own delta. A portion that changes the total size replaces the
+ * map wholesale, which breaks that invariant, so the next merge prunes again.
+ */
+private class CacheAccumulator<T>(private var values: PersistentMap<Int, T>, private val cacheRange: IntRange) {
+    private var pruned: Boolean = true
+
+    fun next(current: PagingMap<T>, portion: DataPortion<T>, onGet: (Int) -> Unit): PagingMap<T> {
+        if (current.size != portion.totalSize) {
+            values = portion.values
+            pruned = false
+            return PagingMap(size = portion.totalSize, values = portion.values, onGet = onGet)
+        }
+
+        values = values.mergeIntoCache(
+            incoming = portion.values,
+            cacheRange = cacheRange,
+            pruneExisting = !pruned,
+        )
+        pruned = true
+        return PagingMap(size = portion.totalSize, values = values, onGet = onGet)
+    }
+}
+
+/**
+ * Extends the pieces that touch a boundary of [bounds] to a full [loadSize], so that an edge of the
+ * fetch window is never requested as a tiny leftover chunk.
+ */
+private fun extendEdges(pieces: List<IntRange>, bounds: IntRange, loadSize: Int): List<IntRange> = pieces.map { piece ->
+    val pieceCount = piece.count()
+    when {
+        piece.first == bounds.first && pieceCount < loadSize -> {
+            val start = (piece.first - (loadSize - pieceCount)).coerceAtLeast(0)
+            start..piece.last
+        }
+
+        piece.last == bounds.last && pieceCount < loadSize -> {
+            val end = piece.last + (loadSize - pieceCount)
+            piece.first..end
+        }
+
+        else -> piece
     }
 }
 
