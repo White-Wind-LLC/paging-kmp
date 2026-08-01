@@ -71,7 +71,7 @@ Available on **Maven Central**.
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ua.wwind.paging:paging-core:2.2.7")
+    implementation("ua.wwind.paging:paging-core:2.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.5.1")
 }
 ```
