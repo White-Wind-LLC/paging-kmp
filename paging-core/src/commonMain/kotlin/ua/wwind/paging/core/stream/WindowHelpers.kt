@@ -52,6 +52,10 @@ internal data class StreamWindowPlan(val window: IntRange?, val chunks: List<Int
  * The chunk grid is aligned to whichever of [activeRanges] still overlaps the window around [key],
  * so that a viewport moving by a few rows keeps its existing streams instead of re-cutting the
  * whole window at a new offset.
+ *
+ * [key] is clamped into `0..<totalSize` first: an out-of-bounds key - the total shrinking below the
+ * viewport, or a transient read past the end - would otherwise align onto a chunk starting at or
+ * beyond the last index, and [alignedChunkContaining] would hand back an empty centre chunk.
  */
 internal fun planStreamWindow(
     activeRanges: Set<IntRange>,
@@ -61,12 +65,13 @@ internal fun planStreamWindow(
 ): StreamWindowPlan {
     if (totalSize == 0) return StreamWindowPlan(window = null, chunks = listOf(0..<config.loadSize))
 
-    val windowForKeyAligned = computeWindowForKeyAligned(key, totalSize, config)
+    val safeKey = key.coerceIn(0, totalSize - 1)
+    val windowForKeyAligned = computeWindowForKeyAligned(safeKey, totalSize, config)
     val keepers = activeRanges.filter { it.intersects(windowForKeyAligned) }
-    val baseStart = keepers.minByOrNull { abs(it.first - key) }?.first
-        ?: alignedChunkStartForKey(key, baseStart = 0, config)
+    val baseStart = keepers.minByOrNull { abs(it.first - safeKey) }?.first
+        ?: alignedChunkStartForKey(safeKey, baseStart = 0, config)
 
-    val centerChunk = alignedChunkContaining(key, baseStart, totalSize, config)
+    val centerChunk = alignedChunkContaining(safeKey, baseStart, totalSize, config)
     val window = computeWindowAroundCenter(centerChunk, totalSize, config)
 
     return StreamWindowPlan(window, chunksAcross(centerChunk, window, totalSize, config))

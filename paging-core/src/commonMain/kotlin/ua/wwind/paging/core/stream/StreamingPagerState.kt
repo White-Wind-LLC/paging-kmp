@@ -149,7 +149,9 @@ internal class StreamingPagerState<T>(
             )
         }
 
-        val toClose = activeStreams.keys.filter { r -> r.first > newTotal || r.last > newTotal }
+        // Valid indices are `0..<newTotal`, so a range is out of bounds as soon as it touches
+        // `newTotal`. For a non-empty range `first <= last`, so testing `last` covers both ends.
+        val toClose = activeStreams.keys.filter { r -> r.last >= newTotal }
         if (toClose.isNotEmpty()) logger.d { "closing due to total shrink: $toClose" }
         toClose.forEach { r ->
             withContext(NonCancellable) {
@@ -159,7 +161,10 @@ internal class StreamingPagerState<T>(
                 }
             }
         }
-        if (lastReadKey > newTotal) keyTrigger.value = newTotal
+        // `lastReadKey == newTotal` is already past the end, hence `>=`. The last valid index is
+        // `newTotal - 1`; on an empty total we fall back to 0 rather than a negative key, which
+        // `StreamingPager` would drop, leaving the trigger stuck.
+        if (lastReadKey >= newTotal) keyTrigger.value = (newTotal - 1).coerceAtLeast(0)
     }
 
     /**
@@ -227,7 +232,9 @@ internal class StreamingPagerState<T>(
         directionForward: Boolean,
         scope: CoroutineScope,
     ) {
-        val toOpen = targetChunks.filter { it !in activeStreams }
+        // An empty range has nothing to fetch, so `openStream` would drop it - marking it here would
+        // leave a `Loading` entry nobody ever clears.
+        val toOpen = targetChunks.filterNot { it.isEmpty() }.filter { it !in activeStreams }
         if (toOpen.isNotEmpty()) {
             logger.d { "opening missing ranges: $toOpen" }
             rangeLoadStates.update { current: Map<IntRange, LoadState>? ->

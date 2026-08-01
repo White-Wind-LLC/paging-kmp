@@ -34,6 +34,9 @@ class StreamingPagerTest {
         }
 
         fun hasPortion(start: Int, size: Int): Boolean = (start to size) in portionFlows
+
+        /** Number of live collectors of a portion flow - 0 once the pager has closed its stream. */
+        fun subscribers(start: Int, size: Int): Int = portionFlows[start to size]?.subscriptionCount?.value ?: 0
     }
 
     private fun buildPager(
@@ -155,6 +158,80 @@ class StreamingPagerTest {
         latest!!.data.size shouldBe 7
         // lastKey should be <= 6
         (latest!!.data.lastKey() <= 6) shouldBe true
+
+        job.cancel()
+    }
+
+    /**
+     * Regression for #5: the clamp applied when the total shrinks used to land the read key exactly
+     * on the new boundary, which produced an empty centre chunk that was marked `Loading` and never
+     * opened - so the pager reported `Loading` forever even with every item cached.
+     */
+    @Test
+    fun total_shrink_past_the_viewport_settles_the_load_state() = runTest {
+        val src = TestSource<Int>()
+        src.totalFlow.value = 20
+        val (pager, advanceFully) = buildPager(this, source = src)
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        advanceFully(10)
+
+        src.emitPortion(0, 5, (0..4).associateWith { it })
+        src.emitPortion(5, 5, (5..9).associateWith { it })
+        advanceFully(10)
+
+        // Move the viewport to the tail of the list.
+        latest!!.data[18]
+        advanceFully(10)
+        src.emitPortion(10, 5, (10..14).associateWith { it })
+        src.emitPortion(15, 5, (15..19).associateWith { it })
+        advanceFully(10)
+        latest!!.loadState shouldBe LoadState.Success
+
+        // Total shrinks well below the last read key (18 -> clamped to index 9).
+        src.totalFlow.value = 10
+        advanceFully(10)
+
+        latest!!.data.size shouldBe 10
+        latest!!.loadState shouldBe LoadState.Success
+
+        job.cancel()
+    }
+
+    /**
+     * Regression for #5: the close filter used `> newTotal`, but valid indices are `0..<newTotal`,
+     * so a stream covering exactly index `newTotal` survived the shrink.
+     */
+    @Test
+    fun total_shrink_closes_the_stream_covering_the_new_boundary_index() = runTest {
+        val src = TestSource<Int>()
+        src.totalFlow.value = 20
+        val (pager, advanceFully) = buildPager(this, source = src)
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        advanceFully(10)
+
+        // Read at 7 so that [5..9] and [10..14] are streaming alongside [0..4].
+        latest!!.data[7]
+        advanceFully(10)
+        src.emitPortion(0, 5, (0..4).associateWith { it })
+        src.emitPortion(5, 5, (5..9).associateWith { it })
+        src.emitPortion(10, 5, (10..14).associateWith { it })
+        advanceFully(10)
+        src.subscribers(5, 5) shouldBe 1
+
+        // Shrink to 9: valid indices are 0..8, so [5..9] is out of bounds by exactly one index.
+        src.totalFlow.value = 9
+        advanceFully(10)
+
+        latest!!.data.size shouldBe 9
+        src.subscribers(5, 5) shouldBe 0
+        src.subscribers(10, 5) shouldBe 0
+        // [0..4] is fully in bounds and stays put, so nothing is left loading.
+        src.subscribers(0, 5) shouldBe 1
+        latest!!.loadState shouldBe LoadState.Success
 
         job.cancel()
     }
