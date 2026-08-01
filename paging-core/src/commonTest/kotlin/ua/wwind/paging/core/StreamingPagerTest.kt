@@ -43,14 +43,14 @@ class StreamingPagerTest {
             preloadSize = 5,
             cacheSize = 100,
             closeThreshold = 5,
-            keyDebounceMs = 0
+            keyDebounceMs = 0,
         ),
         source: TestSource<Int>,
     ): Pair<StreamingPager<Int>, suspend (Int) -> Unit> {
         val pager: StreamingPager<Int> = StreamingPager(
             config = config,
             readTotal = { source.readTotal() },
-            readPortion = { s, sz -> source.readPortion(s, sz) }
+            readPortion = { s, sz -> source.readPortion(s, sz) },
         )
 
         // helper to advance virtual time sufficiently to pass debounce and complete loads
@@ -94,7 +94,7 @@ class StreamingPagerTest {
                 preloadSize = 5,
                 cacheSize = 100,
                 closeThreshold = 5,
-                keyDebounceMs = 300
+                keyDebounceMs = 300,
             ),
             source = src,
         )
@@ -130,7 +130,7 @@ class StreamingPagerTest {
                 preloadSize = 5,
                 cacheSize = 100,
                 closeThreshold = 5,
-                keyDebounceMs = 0
+                keyDebounceMs = 0,
             ),
             source = src,
         )
@@ -170,7 +170,7 @@ class StreamingPagerTest {
                 preloadSize = 5,
                 cacheSize = 10,
                 closeThreshold = 500,
-                keyDebounceMs = 0
+                keyDebounceMs = 0,
             ),
             source = src,
         )
@@ -210,7 +210,7 @@ class StreamingPagerTest {
                 preloadSize = 5,
                 cacheSize = 100,
                 closeThreshold = 5,
-                keyDebounceMs = 300
+                keyDebounceMs = 300,
             ),
             source = src,
         )
@@ -253,7 +253,7 @@ class StreamingPagerTest {
             preloadSize = 5,
             cacheSize = 100,
             closeThreshold = 5,
-            keyDebounceMs = 1
+            keyDebounceMs = 1,
         )
 
         val pager: StreamingPager<Int> = StreamingPager(
@@ -269,7 +269,7 @@ class StreamingPagerTest {
             },
             readPortion = { start, size ->
                 portionFlows.getOrPut(start to size) { MutableSharedFlow(replay = 1) }
-            }
+            },
         )
 
         var latest: PagingData<Int>? = null

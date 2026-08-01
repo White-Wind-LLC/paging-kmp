@@ -21,7 +21,6 @@ fun VerticalScrollbar(
     adapter: ScrollbarAdapter,
     modifier: Modifier = Modifier,
     style: ScrollbarStyle = defaultMaterialScrollbarStyle(),
-    enablePressToScroll: Boolean = false, // Reserved for future interactive behavior
 ) {
     Canvas(modifier = modifier.fillMaxHeight()) {
         val widthPx = style.thickness.toPx()
@@ -30,7 +29,7 @@ fun VerticalScrollbar(
         drawRect(
             color = style.trackColor,
             topLeft = Offset(trackLeft, 0f),
-            size = Size(widthPx, size.height)
+            size = Size(widthPx, size.height),
         )
         // Thumb size and position
         val thumbHeight = max(style.minimalLength.toPx(), size.height * adapter.thumbSizeRatio)
@@ -44,7 +43,7 @@ fun VerticalScrollbar(
             color = style.thumbColor,
             topLeft = Offset(trackLeft, top),
             size = Size(widthPx, thumbHeight),
-            cornerRadius = CornerRadius(x = widthPx / 2f, y = widthPx / 2f)
+            cornerRadius = CornerRadius(x = widthPx / 2f, y = widthPx / 2f),
         )
     }
 }
@@ -57,7 +56,6 @@ fun HorizontalScrollbar(
     adapter: ScrollbarAdapter,
     modifier: Modifier = Modifier,
     style: ScrollbarStyle = defaultMaterialScrollbarStyle(),
-    enablePressToScroll: Boolean = false,
 ) {
     Canvas(modifier = modifier.fillMaxWidth()) {
         val heightPx = style.thickness.toPx()
@@ -66,7 +64,7 @@ fun HorizontalScrollbar(
         drawRect(
             color = style.trackColor,
             topLeft = Offset(0f, trackTop),
-            size = Size(size.width, heightPx)
+            size = Size(size.width, heightPx),
         )
         val thumbWidth = max(style.minimalLength.toPx(), size.width * adapter.thumbSizeRatio)
         val available = (size.width - thumbWidth).coerceAtLeast(0f)
@@ -75,7 +73,7 @@ fun HorizontalScrollbar(
             color = style.thumbColor,
             topLeft = Offset(left, trackTop),
             size = Size(thumbWidth, heightPx),
-            cornerRadius = CornerRadius(x = heightPx / 2f, y = heightPx / 2f)
+            cornerRadius = CornerRadius(x = heightPx / 2f, y = heightPx / 2f),
         )
     }
 }

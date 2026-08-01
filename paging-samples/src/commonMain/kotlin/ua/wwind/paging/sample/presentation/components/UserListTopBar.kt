@@ -38,16 +38,16 @@ fun UserListTopBar(
                 Text(
                     text = "Paging Sample",
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
                 )
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val summary = buildString {
                         append(
-                            if (totalUsers > 0) "$totalUsers users" else "Loading users..."
+                            if (totalUsers > 0) "$totalUsers users" else "Loading users...",
                         )
                         if (useMediator && cachedCount != null) {
                             append("  •  cache: ")
@@ -61,13 +61,13 @@ fun UserListTopBar(
                     Text(
                         text = summary,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
 
                     if (loadState == LoadState.Loading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
+                            strokeWidth = 2.dp,
                         )
                     }
                 }
@@ -76,22 +76,22 @@ fun UserListTopBar(
         actions = {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     text = "Mediator",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Switch(
                     checked = useMediator,
-                    onCheckedChange = onUseMediatorChange
+                    onCheckedChange = onUseMediatorChange,
                 )
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surface,
         ),
-        modifier = modifier
+        modifier = modifier,
     )
 }

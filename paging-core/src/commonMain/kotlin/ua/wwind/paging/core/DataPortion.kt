@@ -25,7 +25,4 @@ import kotlinx.collections.immutable.PersistentMap
  * @param totalSize Total number of items available in the complete dataset
  * @param values Map of position to loaded items
  */
-public data class DataPortion<T>(
-    val totalSize: Int,
-    val values: PersistentMap<Int, T>,
-)
+public data class DataPortion<T>(val totalSize: Int, val values: PersistentMap<Int, T>)

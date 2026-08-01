@@ -23,7 +23,7 @@ class SharedEditableUsersStore(initialSize: Int = 200) {
             role = UserRole.entries[id % UserRole.entries.size],
             avatarUrl = "https://api.dicebear.com/7.x/avataaars/svg?seed=$id",
             isActive = id % 2 == 0,
-            joinedDate = "2023-01-${(id % 28 + 1).toString().padStart(2, '0')}"
+            joinedDate = "2023-01-${(id % 28 + 1).toString().padStart(2, '0')}",
         )
     }
 
@@ -32,17 +32,16 @@ class SharedEditableUsersStore(initialSize: Int = 200) {
     fun totalFlow(): Flow<Int> = usersFlow.map { it.size }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun portionMapFlow(startPosition: Int, size: Int): Flow<Map<Int, User>> =
-        usersFlow
-            .mapLatest { list ->
-                val total = list.size
-                val startIndex = startPosition.coerceAtLeast(0)
-                val endIndexExclusive = (startIndex + size).coerceAtMost(total)
-                if (startIndex in 0 ..< total) list.subList(startIndex, endIndexExclusive) else emptyList()
-            }.distinctUntilChanged()
-            .map { slice ->
-                slice.mapIndexed { idx, user -> (startPosition + idx) to user }.toMap()
-            }
+    fun portionMapFlow(startPosition: Int, size: Int): Flow<Map<Int, User>> = usersFlow
+        .mapLatest { list ->
+            val total = list.size
+            val startIndex = startPosition.coerceAtLeast(0)
+            val endIndexExclusive = (startIndex + size).coerceAtMost(total)
+            if (startIndex in 0..<total) list.subList(startIndex, endIndexExclusive) else emptyList()
+        }.distinctUntilChanged()
+        .map { slice ->
+            slice.mapIndexed { idx, user -> (startPosition + idx) to user }.toMap()
+        }
 
     fun updateAt(position: Int, transform: (User) -> User) {
         if (position in users.indices) {

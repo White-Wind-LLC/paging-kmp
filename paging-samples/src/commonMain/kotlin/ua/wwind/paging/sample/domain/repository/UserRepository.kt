@@ -18,7 +18,4 @@ interface UserRemoteDataSource {
 /**
  * Container for paginated user data
  */
-data class UserPage(
-    val users: List<User>,
-    val totalCount: Int,
-)
+data class UserPage(val users: List<User>, val totalCount: Int)

@@ -17,10 +17,7 @@ import ua.wwind.paging.sample.domain.model.UserRole
  * Component for displaying user role as a colored badge
  */
 @Composable
-fun RoleBadge(
-    role: UserRole,
-    modifier: Modifier = Modifier,
-) {
+fun RoleBadge(role: UserRole, modifier: Modifier = Modifier) {
     val (backgroundColor, textColor) = getRoleColors(role)
 
     Text(
@@ -31,7 +28,7 @@ fun RoleBadge(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(backgroundColor)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
     )
 }
 
@@ -39,11 +36,15 @@ fun RoleBadge(
  * Returns appropriate colors for different user roles
  */
 @Composable
-private fun getRoleColors(role: UserRole): Pair<Color, Color> {
-    return when (role) {
-        UserRole.ADMIN -> Color(0xFFE53E3E) to Color.White // Red
-        UserRole.MODERATOR -> Color(0xFF3182CE) to Color.White // Blue  
-        UserRole.USER -> Color(0xFF38A169) to Color.White // Green
-        UserRole.GUEST -> Color(0xFF718096) to Color.White // Gray
-    }
+private fun getRoleColors(role: UserRole): Pair<Color, Color> = when (role) {
+    UserRole.ADMIN -> Color(0xFFE53E3E) to Color.White
+
+    // Red
+    UserRole.MODERATOR -> Color(0xFF3182CE) to Color.White
+
+    // Blue
+    UserRole.USER -> Color(0xFF38A169) to Color.White
+
+    // Green
+    UserRole.GUEST -> Color(0xFF718096) to Color.White // Gray
 }

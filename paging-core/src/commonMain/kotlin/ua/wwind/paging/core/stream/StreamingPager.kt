@@ -78,8 +78,8 @@ public class StreamingPager<T>(
         val logger = Logger(
             StaticConfig(
                 minSeverity = runCatching { Severity.valueOf(BuildKonfig.LOG_LEVEL) }
-                    .getOrDefault(Severity.Debug)
-            )
+                    .getOrDefault(Severity.Debug),
+            ),
         )
 
         val state = StreamingPagerState(

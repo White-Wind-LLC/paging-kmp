@@ -21,11 +21,8 @@ class PagingMediatorTest {
      * Simple in-memory LocalDataSource for tests.
      * Stores absolute-positioned values and totalSize, tracks clear/save calls.
      */
-    private class FakeLocal<T, Q>(
-        initialTotalSize: Int = 0,
-        initialValues: Map<Int, T> = emptyMap(),
-        query: Q,
-    ) : LocalDataSource<T, Q> {
+    private class FakeLocal<T, Q>(initialTotalSize: Int = 0, initialValues: Map<Int, T> = emptyMap(), query: Q) :
+        LocalDataSource<T, Q> {
         var totalSize: Int = initialTotalSize
         private val storage: MutableMap<Int, T> = initialValues.toMutableMap()
 
@@ -54,9 +51,8 @@ class PagingMediatorTest {
     /**
      * Remote stub that can delay and capture calls.
      */
-    private class FakeRemote<T, Q>(
-        private val onFetch: suspend (start: Int, size: Int, query: Q) -> DataPortion<T>
-    ) : RemoteDataSource<T, Q> {
+    private class FakeRemote<T, Q>(private val onFetch: suspend (start: Int, size: Int, query: Q) -> DataPortion<T>) :
+        RemoteDataSource<T, Q> {
         var calls: Int = 0
         val callArgs: MutableList<Pair<Int, Int>> = mutableListOf()
 
@@ -275,7 +271,7 @@ class PagingMediatorTest {
 
         job.cancel()
     }
-    
+
     @Test
     fun sequential_scroll_over_20_items_with_load_size_5_uses_four_remote_requests() = runTest {
         val local = FakeLocal<Item, Unit>(
@@ -302,20 +298,20 @@ class PagingMediatorTest {
         var latest: PagingData<Item>? = null
         val job: Job = launch { mediator.flow(Unit).collectLatest { latest = it } }
         this.testScheduler.runCurrent()
-        
+
         (0..19).forEach { index ->
             latest!!.data[index]
             this.testScheduler.advanceTimeBy(300)
             this.testScheduler.runCurrent()
         }
         this.testScheduler.advanceUntilIdle()
-        
+
         remote.callArgs.distinct() shouldBe listOf(0 to 5, 5 to 5, 10 to 5, 15 to 5)
-        
+
         val after = latest!!
         after.loadState.shouldBeInstanceOf<LoadState.Success>()
         (0..19).forEach { pos -> after.data[pos].shouldBeInstanceOf<EntryState.Success<Item>>() }
-        
+
         job.cancel()
     }
 }

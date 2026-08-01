@@ -69,7 +69,10 @@ class DiagnosticsFindingsTest {
             items.map { list ->
                 val end = (start + size).coerceAtMost(list.size)
                 if (start < end) (start until end).associateWith { list[it] } else emptyMap()
-            }.distinctUntilChanged().collect { portionEmissions++; emit(it) }
+            }.distinctUntilChanged().collect {
+                portionEmissions++
+                emit(it)
+            }
         }
     }
 
@@ -166,8 +169,10 @@ class DiagnosticsFindingsTest {
         val job = launch { p.flow.collectLatest { latest = it } }
         testScheduler.advanceUntilIdle()
 
-        latest!!.data[100]; testScheduler.advanceUntilIdle()
-        latest!!.data[600]; testScheduler.advanceUntilIdle()
+        latest!!.data[100]
+        testScheduler.advanceUntilIdle()
+        latest!!.data[600]
+        testScheduler.advanceUntilIdle()
 
         // everything around 100 is cached and nothing was evicted (cacheSize = 1000)
         val cachedAround100 = (60..140).count { it in latest!!.data.values }
@@ -197,7 +202,10 @@ class DiagnosticsFindingsTest {
         val p = Pager<Int>(20, 20, 100) { pos, size ->
             flow {
                 attempts += pos
-                if (failNext) { failNext = false; throw IllegalStateException("boom") }
+                if (failNext) {
+                    failNext = false
+                    throw IllegalStateException("boom")
+                }
                 emit(DataPortion(1_000, (pos..pos + size - 1).associateWith { it }.toPersistentMap()))
             }
         }
@@ -208,13 +216,13 @@ class DiagnosticsFindingsTest {
         val failedKey = (latest!!.loadState as LoadState.Error).key
         val before = attempts.size
 
-        latest!!.retry(failedKey)              // the documented call
+        latest!!.retry(failedKey) // the documented call
         testScheduler.advanceUntilIdle()
 
-        attempts.size shouldBe before          // nothing was retried
+        attempts.size shouldBe before // nothing was retried
         (latest!!.loadState is LoadState.Error) shouldBe true
 
-        latest!!.retry(failedKey + 1)          // only a *different* key works
+        latest!!.retry(failedKey + 1) // only a *different* key works
         testScheduler.advanceUntilIdle()
         attempts.size shouldBe before + 1
         latest!!.loadState shouldBe LoadState.Success
@@ -244,11 +252,11 @@ class DiagnosticsFindingsTest {
         p.refresh()
         testScheduler.advanceUntilIdle()
         latest!!.data.values.size shouldBe 0
-        latest!!.loadState shouldBe LoadState.Success   // "success", but empty
+        latest!!.loadState shouldBe LoadState.Success // "success", but empty
 
-        latest!!.data[0]                                // re-access same key
+        latest!!.data[0] // re-access same key
         testScheduler.advanceUntilIdle()
-        latest!!.data.values.size shouldBe 0            // still empty
+        latest!!.data.values.size shouldBe 0 // still empty
         job.cancel()
     }
 
@@ -276,7 +284,7 @@ class DiagnosticsFindingsTest {
         testScheduler.advanceUntilIdle()
         transitions.clear()
 
-        latest!!.data[70]                       // small scroll, data already cached
+        latest!!.data[70] // small scroll, data already cached
         testScheduler.advanceUntilIdle()
 
         transitions shouldBe listOf("Loading", "Success")
@@ -300,7 +308,7 @@ class DiagnosticsFindingsTest {
         testScheduler.advanceUntilIdle()
         latest!!.loadState shouldBe LoadState.Success
 
-        s.items.value = s.items.value.take(40)     // total shrinks 100 -> 40
+        s.items.value = s.items.value.take(40) // total shrinks 100 -> 40
         testScheduler.advanceUntilIdle()
 
         latest!!.data.size shouldBe 40
@@ -369,7 +377,7 @@ class DiagnosticsFindingsTest {
             val stationary = bench(3_000) { cache.mergeIntoCache(delta, range, pruneExisting = false) }
             println(
                 "  cacheSize=$cacheSize entries=${cache.size}: legacy=$old merge=$merged " +
-                    "stationary=$stationary speedup=${old / merged} / ${old / stationary}"
+                    "stationary=$stationary speedup=${old / merged} / ${old / stationary}",
             )
         }
     }

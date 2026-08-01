@@ -1,0 +1,18 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# NOTE: Spotless does not read this file — ktlint settings (code style, rule toggles)
+# are declared in build.gradle.kts via editorConfigOverride. Keep ktlint_* keys there,
+# not here, so the build never looks configured while running on ktlint's defaults.
+[*.{kt,kts}]
+max_line_length = 120
+
+[*.{yml,yaml,json,toml}]
+indent_size = 2

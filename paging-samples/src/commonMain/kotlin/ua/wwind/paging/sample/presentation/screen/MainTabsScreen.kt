@@ -18,10 +18,7 @@ import ua.wwind.paging.sample.presentation.viewmodel.StreamingUserListViewModel
 import ua.wwind.paging.sample.presentation.viewmodel.UserListViewModel
 
 @Composable
-fun MainTabsScreen(
-    scope: CoroutineScope,
-    modifier: Modifier = Modifier,
-) {
+fun MainTabsScreen(scope: CoroutineScope, modifier: Modifier = Modifier) {
     val selectedTab = remember { mutableIntStateOf(0) }
 
     Column {
@@ -30,7 +27,8 @@ fun MainTabsScreen(
             Tab(
                 selected = selectedTab.value == 1,
                 onClick = { selectedTab.value = 1 },
-                text = { Text("StreamingPager") })
+                text = { Text("StreamingPager") },
+            )
         }
 
         when (selectedTab.value) {
@@ -40,7 +38,7 @@ fun MainTabsScreen(
                 val vm = UserListViewModel(
                     remote = remote,
                     local = local,
-                    useMediator = false
+                    useMediator = false,
                 )
                 val useMediator = remember { mutableStateOf(false) }
                 UserListScreen(
@@ -54,7 +52,7 @@ fun MainTabsScreen(
                     },
                     cachedCountFlow = local.cachedCount,
                     lastMinSavedKeyFlow = local.lastSavedMinKey,
-                    modifier = modifier
+                    modifier = modifier,
                 )
             }
 

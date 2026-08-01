@@ -47,7 +47,7 @@ public class PagingMediator<T, Q>(
             loadSize = config.loadSize,
             preloadSize = config.prefetchSize,
             cacheSize = config.cacheSize,
-            readData = { position, size -> loadPortion(query, position, size) }
+            readData = { position, size -> loadPortion(query, position, size) },
         )
         return pager.flow
     }
@@ -56,10 +56,12 @@ public class PagingMediator<T, Q>(
      * Loads the requested range [position, position + size - 1].
      *
      * Steps:
-     * 1) Read from local storage, optionally either emit raw local data (see [PagingMediatorConfig.emitOutdatedRecords]),
-     *    or emit the filtered local portion where stale records are removed via [PagingMediatorConfig.isRecordStale].
+     * 1) Read from local storage, optionally either emit raw local data
+     *    (see [PagingMediatorConfig.emitOutdatedRecords]), or emit the filtered local portion
+     *    where stale records are removed via [PagingMediatorConfig.isRecordStale].
      * 2) Compute missing contiguous subranges and fetch them from the remote source (optionally in parallel).
-     * 3) Optionally emit intermediate remote portions as they arrive (see [PagingMediatorConfig.emitIntermediateResults]).
+     * 3) Optionally emit intermediate remote portions as they arrive
+     *    (see [PagingMediatorConfig.emitIntermediateResults]).
      * 4) Emit a merged portion and a final marker which triggers cache persistence upstream.
      *
      * Total size consistency:
@@ -84,15 +86,21 @@ public class PagingMediator<T, Q>(
         if (!config.emitOutdatedRecords) emit(localPortion)
 
         val missingRanges =
-            if (config.fetchFullRangeOnMiss) listOf(requestedRange)
-            else computeMissingRanges(requestedRange, localPortion.values.keys)
+            if (config.fetchFullRangeOnMiss) {
+                listOf(requestedRange)
+            } else {
+                computeMissingRanges(requestedRange, localPortion.values.keys)
+            }
 
         if (missingRanges.isNotEmpty()) {
             // Fetch and persist each missing contiguous range
             fetchMissingRanges(missingRanges, query, localPortion, requestedRange)
                 .collect { (portion, final) ->
-                    if (!final) emit(portion)
-                    else local.save(portion)
+                    if (!final) {
+                        emit(portion)
+                    } else {
+                        local.save(portion)
+                    }
                 }
         }
     }
@@ -146,7 +154,7 @@ public class PagingMediator<T, Q>(
         val distinctTotals = fetchedPortions.map { it.totalSize }.distinct()
         val inconsistentTotals =
             distinctTotals.size > 1 ||
-                    (localPortion.totalSize != 0 && distinctTotals.single() != localPortion.totalSize)
+                (localPortion.totalSize != 0 && distinctTotals.single() != localPortion.totalSize)
         if (inconsistentTotals && !isRetryAfterClear) {
             // Total size can change after loading or be different in different portions. It means that data is
             // inconsistent. We need to refetch the full range of the data.
@@ -171,10 +179,7 @@ public class PagingMediator<T, Q>(
      * @param query Query/filter forwarded to the remote data source.
      * @return [DataPortion] containing the fetched items and a total size hint.
      */
-    private suspend fun fetchRange(
-        range: IntRange,
-        query: Q,
-    ): DataPortion<T> {
+    private suspend fun fetchRange(range: IntRange, query: Q): DataPortion<T> {
         val fetchSize = range.last - range.first + 1
         return remote.fetch(range.first, fetchSize, query)
     }

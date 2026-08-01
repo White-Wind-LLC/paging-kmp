@@ -32,32 +32,29 @@ import androidx.compose.ui.unit.dp
  * Shimmer loading placeholder for user items
  */
 @Composable
-fun LoadingItem(
-    position: Int,
-    modifier: Modifier = Modifier,
-) {
+fun LoadingItem(position: Int, modifier: Modifier = Modifier) {
     val infiniteTransition = rememberInfiniteTransition()
     val alpha by infiniteTransition.animateFloat(
         initialValue = 0.2f,
         targetValue = 0.8f,
         animationSpec = infiniteRepeatable(
             animation = tween(1000),
-            repeatMode = RepeatMode.Reverse
-        )
+            repeatMode = RepeatMode.Reverse,
+        ),
     )
 
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             // Loading avatar
             Box(
@@ -65,13 +62,13 @@ fun LoadingItem(
                     .size(50.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.onSurface)
-                    .graphicsLayer(alpha = alpha)
+                    .graphicsLayer(alpha = alpha),
             )
 
             // Loading text placeholders
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 // Name placeholder
                 Box(
@@ -80,7 +77,7 @@ fun LoadingItem(
                         .height(16.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.onSurface)
-                        .graphicsLayer(alpha = alpha)
+                        .graphicsLayer(alpha = alpha),
                 )
 
                 // Email placeholder
@@ -90,7 +87,7 @@ fun LoadingItem(
                         .height(14.dp)
                         .clip(RoundedCornerShape(7.dp))
                         .background(MaterialTheme.colorScheme.onSurface)
-                        .graphicsLayer(alpha = alpha)
+                        .graphicsLayer(alpha = alpha),
                 )
 
                 // Date placeholder
@@ -100,7 +97,7 @@ fun LoadingItem(
                         .height(12.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(MaterialTheme.colorScheme.onSurface)
-                        .graphicsLayer(alpha = alpha)
+                        .graphicsLayer(alpha = alpha),
                 )
             }
             Text(position.toString())

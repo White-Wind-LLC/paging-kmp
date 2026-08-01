@@ -26,7 +26,7 @@ class UserListViewModel(
     val pagingFlow: Flow<PagingData<User>> = if (useMediator) {
         val mediator = PagingMediator<User, Unit>(
             local = local,
-            remote = UserRemoteDataSourceAdapter(remote)
+            remote = UserRemoteDataSourceAdapter(remote),
         )
         mediator.flow(Unit)
     } else {
@@ -34,7 +34,7 @@ class UserListViewModel(
             loadSize = 20,
             preloadSize = 60,
             cacheSize = 100,
-            readData = ::loadUsersDirect
+            readData = ::loadUsersDirect,
         )
         pager.flow
     }

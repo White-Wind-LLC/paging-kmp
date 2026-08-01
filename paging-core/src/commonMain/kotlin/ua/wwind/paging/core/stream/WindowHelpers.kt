@@ -1,16 +1,12 @@
 package ua.wwind.paging.core.stream
 
-internal fun IntRange.intersects(other: IntRange): Boolean {
-    return this.first <= other.last && this.last >= other.first
-}
+internal fun IntRange.intersects(other: IntRange): Boolean = this.first <= other.last && this.last >= other.first
 
-internal fun distanceBeyondWindow(window: IntRange, range: IntRange): Int {
-    return when {
-        window.intersects(range) -> 0
-        window.last < range.first -> range.first - window.last
-        range.last < window.first -> window.first - range.last
-        else -> 0
-    }
+internal fun distanceBeyondWindow(window: IntRange, range: IntRange): Int = when {
+    window.intersects(range) -> 0
+    window.last < range.first -> range.first - window.last
+    range.last < window.first -> window.first - range.last
+    else -> 0
 }
 
 internal fun computeWindowForKeyAligned(key: Int, totalSize: Int, config: StreamingPagerConfig): IntRange {
@@ -34,12 +30,7 @@ internal fun alignedChunkStartForKey(key: Int, baseStart: Int, config: Streaming
     return baseStart + steps * config.loadSize
 }
 
-internal fun alignedChunkContaining(
-    key: Int,
-    baseStart: Int,
-    totalSize: Int,
-    config: StreamingPagerConfig,
-): IntRange {
+internal fun alignedChunkContaining(key: Int, baseStart: Int, totalSize: Int, config: StreamingPagerConfig): IntRange {
     val start = alignedChunkStartForKey(key, baseStart, config).coerceAtLeast(0)
     val end = (start + config.loadSize).coerceAtMost(totalSize.coerceAtLeast(1))
     return start..<end

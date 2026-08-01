@@ -2,7 +2,7 @@ package ua.wwind.paging.core
 
 @RequiresOptIn(
     message = "StreamingPager API is experimental and may change without notice.",
-    level = RequiresOptIn.Level.WARNING
+    level = RequiresOptIn.Level.WARNING,
 )
 @Retention(AnnotationRetention.BINARY)
 @Target(
@@ -10,6 +10,6 @@ package ua.wwind.paging.core
     AnnotationTarget.FUNCTION,
     AnnotationTarget.PROPERTY,
     AnnotationTarget.TYPEALIAS,
-    AnnotationTarget.CONSTRUCTOR
+    AnnotationTarget.CONSTRUCTOR,
 )
 public annotation class ExperimentalStreamingPagerApi

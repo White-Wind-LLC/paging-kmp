@@ -1,0 +1,7 @@
+# Bulk reformatting commits, skipped by `git blame`.
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub honours this file automatically.
+
+# style: format all Kotlin sources with Spotless
+af4be16c78ac53aa05246ab79b2d6811af62bb75

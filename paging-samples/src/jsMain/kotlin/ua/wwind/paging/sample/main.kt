@@ -3,8 +3,8 @@ package ua.wwind.paging.sample
 import App
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.ComposeViewport
-import org.jetbrains.skiko.wasm.onWasmReady
 import kotlinx.browser.document
+import org.jetbrains.skiko.wasm.onWasmReady
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {

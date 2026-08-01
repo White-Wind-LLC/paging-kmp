@@ -1,0 +1,51 @@
+# Deviations from detekt's default configuration.
+# The build sets buildUponDefaultConfig = true, so this file must contain ONLY
+# what we intentionally change. Never paste the full default config here.
+#
+# Two kinds of entries are allowed:
+#   1. A disabled or relaxed rule — always with a comment explaining why.
+#   2. Test-path exclusions — KMP source sets are named commonTest/jvmTest/…,
+#      so detekt's built-in `**/test/**` patterns do not match them.
+
+config:
+  validation: true
+
+complexity:
+  LongMethod:
+    # KMP source sets are named commonTest/jvmTest/…, so detekt's default `**/test/**`
+    # exclusions never match them. Long, linear test bodies are the point of a test.
+    excludes: &testPaths
+      - '**/commonTest/**'
+      - '**/jvmTest/**'
+      - '**/androidUnitTest/**'
+    # A @Composable function is a declarative UI tree, not a procedure; its length says
+    # nothing about how hard it is to follow.
+    ignoreAnnotated:
+      - 'Composable'
+
+exceptions:
+  TooGenericExceptionCaught:
+    # This library deliberately catches Throwable-shaped failures from user-supplied loaders
+    # and surfaces them as LoadState.Error. Every such site re-throws CancellationException
+    # first, so coroutine cancellation is not swallowed. Narrowing the catch would mean
+    # silently dropping whatever a caller's data source happens to throw.
+    active: false
+
+naming:
+  FunctionNaming:
+    # @Composable functions are PascalCase by Compose convention.
+    ignoreAnnotated:
+      - 'Composable'
+  MatchingDeclarationName:
+    # Disabled for the same reason as ktlint's standard:filename rule (see build.gradle.kts):
+    # the project uses platform-suffixed file names such as App.android.kt, which the rule
+    # reads as a mismatch against the declaration inside.
+    active: false
+
+style:
+  MagicNumber:
+    excludes: *testPaths
+    # Sample UI code is full of literal dimensions, alpha values and weights. Hoisting each
+    # one into a named constant would make the samples harder to read, not easier.
+    ignoreAnnotated:
+      - 'Composable'

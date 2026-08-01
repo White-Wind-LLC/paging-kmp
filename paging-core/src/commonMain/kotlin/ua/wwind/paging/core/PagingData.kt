@@ -23,11 +23,7 @@ package ua.wwind.paging.core
  * @param loadState Current global loading state (Loading, Success, or Error)
  * @param retry Function to retry loading for a specific position
  */
-public data class PagingData<T>(
-    val data: PagingMap<T>,
-    val loadState: LoadState,
-    val retry: (key: Int) -> Unit
-) {
+public data class PagingData<T>(val data: PagingMap<T>, val loadState: LoadState, val retry: (key: Int) -> Unit) {
     public companion object {
         /**
          * Creates an empty PagingData instance with no items and success state.
@@ -42,17 +38,15 @@ public data class PagingData<T>(
          *
          * @return Empty PagingData instance
          */
-        public fun <T> empty(): PagingData<T> {
-            return PagingData(PagingMap.empty(), LoadState.Success) {}
-        }
+        public fun <T> empty(): PagingData<T> = PagingData(PagingMap.empty(), LoadState.Success) {}
     }
+
     /**
      * Transforms items in this PagingData from type T to type R while preserving
      * paging state and retry functionality.
      *
      * Applies transformation only to currently loaded items, not future ones.
      */
-    public fun <R> map(transform: (T) -> R): PagingData<R> {
-        return PagingData(data = data.mapValues(transform), loadState = loadState, retry = retry)
-    }
+    public fun <R> map(transform: (T) -> R): PagingData<R> =
+        PagingData(data = data.mapValues(transform), loadState = loadState, retry = retry)
 }
