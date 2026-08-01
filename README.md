@@ -32,7 +32,8 @@ Build infinite-scroll lists, virtualized tables, and live-updating feeds with **
 - 📡 **Real-time streaming pagination** — `StreamingPager` keeps paginated lists **live** by streaming the total count and
   individual page windows over **SSE or WebSockets**. ([Jump to the example ↓](#-real-time-pagination-over-sse-streamingpager))
 - 🧩 **Compose-ready** — immutable `PersistentMap`-backed snapshots and a `Flow<PagingData<T>>` API that drops straight
-  into `LazyColumn` / `LazyList`.
+  into `LazyColumn` / `LazyList`, with a [stability configuration](#compose-stability) that makes composables taking a
+  `PagingData` skippable and reads of already-loaded rows free.
 - 🧵 **Coroutines-native & lifecycle-aware** — non-blocking, `Mutex`-guarded, debounced loading; all internal jobs are
   bound to the collection lifecycle of the returned `Flow` and cancel automatically.
 
@@ -203,6 +204,44 @@ fun UserList() {
     }
 }
 ```
+
+### Compose stability
+
+`paging-core` is built **without** the Compose compiler plugin, which is what keeps it usable from plain Kotlin and free
+of a Compose runtime dependency. The flip side is that the Compose compiler cannot infer stability for types it did not
+compile: left alone, it treats `PagingData` and everything around it as *unstable*, so a composable taking one is never
+skippable and re-runs on every emission — even when nothing it reads changed.
+
+The repository ships [`compose_compiler_config.conf`](compose_compiler_config.conf) with the types declared stable.
+Copy it into your project and point the Compose compiler at it from every module that consumes a pager:
+
+```kotlin
+composeCompiler {
+    stabilityConfigurationFiles.add(
+        rootProject.layout.projectDirectory.file("compose_compiler_config.conf"),
+    )
+}
+```
+
+The claim is accurate: every one of those types is an immutable snapshot of `val`s, and the pagers publish a new
+instance per state change instead of mutating the one already handed out. Your own item type still has to be stable in
+its own right for a row to be skippable, which it is by default for a `data class` of `val`s compiled in your module.
+
+To check what the compiler makes of it, `composeCompiler { reportsDestination.set(...) }` writes a report listing every
+composable and the stability of each of its parameters. `paging-samples` wires this up behind a flag:
+
+```bash
+./gradlew :paging-samples:compileKotlinJvm -PcomposeReports
+```
+
+### Reads of loaded rows are free
+
+`pagingData.data[index]` is what tells the pager where the viewport is, and a `LazyColumn` re-reads every visible row on
+every recomposition. Once the window around the reader is loaded, none of those reads can change what the pager would
+do, so they no longer touch the key trigger at all: a read is a map lookup and nothing else. Reads within one `loadSize`
+of the edge of the loaded window still count, which is what keeps the window moving ahead of the scroll, and anything
+that invalidates the cache — a `refresh()`, a failed load, a hole left by a short portion — makes every read count
+again.
 
 ---
 
