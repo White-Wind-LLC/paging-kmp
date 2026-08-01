@@ -1,167 +1,176 @@
-# Інваріант `cacheSize >= preloadSize`
+# The `cacheSize >= preloadSize` invariant
 
-**Дата:** 2026-08-01
-**Статус:** затверджено
+**Date:** 2026-08-01
+**Status:** approved
 **Issue:** [#13](https://github.com/White-Wind-LLC/paging-kmp/issues/13)
 
-## Проблема
+## Problem
 
-Конфігурація пейджерів валідується лише на знак: `loadSize > 0`, `preloadSize >= 0`,
-`cacheSize >= 0`. Ніде не перевіряється співвідношення `cacheSize` і `preloadSize`, хоча між ними
-є жорстка залежність: пейджер завантажує дані у вікні радіусом `preloadSize` навколо останнього
-прочитаного ключа, а утримує в пам'яті лише вікно радіусом `cacheSize` навколо того самого ключа.
+Pager configuration is validated for sign only: `loadSize > 0`, `preloadSize >= 0`,
+`cacheSize >= 0`. Nothing checks `cacheSize` against `preloadSize`, even though the two are tightly
+coupled: a pager loads data within a window of radius `preloadSize` around the last accessed key,
+but retains in memory only a window of radius `cacheSize` around that same key.
 
-Коли `cacheSize < preloadSize`, пейджер відкриває стріми на вікно, яке не здатен утримати.
-`StreamingPagerState.onPortion` обрізає кожну порцію, що приходить, по `cacheRange` і викидає
-більшу її частину одразу після отримання, а стріми лишаються відкритими й далі штовхають дані,
-які так само викидаються. Помилки немає, попередження немає, логу немає.
+When `cacheSize < preloadSize`, the pager opens streams for a window it cannot hold.
+`StreamingPagerState.onPortion` prunes every arriving portion against `cacheRange` and drops most of
+it immediately, while the streams stay open and keep pushing data that is discarded the same way.
+There is no error, no warning and no log.
 
-Заміряно на `loadSize=20, preloadSize=100, cacheSize=40` зі стрибком на позицію 500:
+Measured at `loadSize=20, preloadSize=100, cacheSize=40` with a jump to position 500:
 
-- 340 елементів витягнуто по мережі
-- 81 елемент утримано
-- ~76% трафіку викинуто на вході
-- 11 портційних стрімів лишилися відкритими й довічно штовхають дані в нікуди
+- 340 items pulled over the wire
+- 81 items retained
+- ~76% of the payload discarded on arrival
+- 11 portion streams left open, pushing data into the bin forever
 
-Та сама залежність існує в `Pager` (`Pager.kt:228` проти `Pager.kt:330`) і, транзитивно, у
-`PagingMediatorConfig`, який пробрасує `prefetchSize`/`cacheSize` у `Pager`.
+The same relationship exists in `Pager` (`Pager.kt:228` against `Pager.kt:330`) and, transitively,
+in `PagingMediatorConfig`, which forwards `prefetchSize`/`cacheSize` to `Pager`.
 
-Додатково, KDoc сам вводить в оману: у `Pager` написано «Maximum number of items to keep in
-memory (default: 100)», хоча `cacheSize` — це радіус, і реально утримується до `2*cacheSize+1`
-елементів. Формулювання «Cache radius in indices around the last accessed key» у
-`StreamingPagerConfig` не бреше, але й не натякає, що радіус має бути не меншим за preload-радіус.
+The KDoc is misleading on top of that: `Pager` says "Maximum number of items to keep in memory
+(default: 100)", while `cacheSize` is a radius and the cache actually holds up to `2 * cacheSize`
+items. The wording in `StreamingPagerConfig` — "Cache radius in indices around the last accessed
+key" — is not wrong, but gives no hint that the radius has to be at least the preload radius.
 
-## Мета
+## Goals
 
-1. Невалідне співвідношення `cacheSize`/`preloadSize` виявляється одразу при створенні пейджера,
-   а не проявляється як мовчазна втрата трафіку.
-2. Повідомлення про помилку пояснює зв'язок між параметрами, а не лише констатує факт.
-3. Документація описує обидва параметри як радіуси та фіксує інваріант.
+1. An invalid `cacheSize`/`preloadSize` ratio surfaces immediately when the pager is constructed,
+   instead of silently burning bandwidth.
+2. The error message explains the relationship between the parameters rather than just stating a
+   failed condition.
+3. The documentation describes both parameters as radii and states the invariant.
 
-## Обсяг
+## Scope
 
-**Входить:**
+**In scope:**
 
-- `require(cacheSize >= preloadSize)` у `StreamingPagerConfig`, `Pager`, `PagingMediatorConfig`.
-- Перенесення наявних `require` зі `StreamingPager.init` у `init` самого `StreamingPagerConfig`.
-- Повний набір `require` у `Pager`, який зараз не має жодної валідації.
-- Виправлення KDoc для `cacheSize`/`preloadSize`/`prefetchSize` у трьох місцях + коментарі в
-  `README.md`.
-- Приведення власних тестів до інваріанта та переписування репро-тесту F8 у регресійний.
-- Нові тести на валідацію для всіх трьох конфігурацій.
-- Запис у `CHANGELOG.md`.
+- `require(cacheSize >= preloadSize)` in `StreamingPagerConfig`, `Pager` and `PagingMediatorConfig`.
+- Moving the existing `require`s from `StreamingPager.init` into the `init` of
+  `StreamingPagerConfig` itself.
+- A full set of `require`s in `Pager`, which currently has no validation at all.
+- KDoc corrections for `cacheSize`/`preloadSize`/`prefetchSize` in three places, plus the matching
+  comments in `README.md`.
+- Bringing the project's own tests in line with the invariant, and rewriting the F8 repro test as a
+  regression test.
+- New validation tests for all three configurations.
+- A `CHANGELOG.md` entry.
 
-**Не входить:**
+**Out of scope:**
 
-- Clamp `preloadSize` до `cacheSize` — свідомо відкинуто на користь fail-fast.
-- Логер у `Pager`/`PagingMediator` — потрібен був би лише для варіанта з clamp.
-- Зміна сітки чанків у `StreamingPager` — залишковий відкид на краях сітки документується,
-  але не виправляється в межах цього issue.
-- Валідація інших полів (`concurrency`, `closeThreshold` понад наявну перевірку знаку).
+- Clamping `preloadSize` down to `cacheSize` — deliberately rejected in favour of failing fast.
+- A logger in `Pager`/`PagingMediator` — only needed for the clamping variant.
+- Changing the chunk grid in `StreamingPager`. The residual waste at the edges of the grid is
+  documented but not fixed here.
+- Validating other fields (`concurrency`, or `closeThreshold` beyond its existing sign check).
 
-## Рішення
+## Decisions
 
-### Чому fail-fast, а не clamp
+### Why fail-fast rather than clamping
 
-`cacheSize < preloadSize` — це помилка конфігурації, у якої немає розумного runtime-фолбеку.
-Мовчазний clamp дав би користувачу менший preload, ніж він просив, і сховав би причину. Виняток
-при створенні пейджера вказує на конкретний рядок конфігурації.
+`cacheSize < preloadSize` is a configuration error with no sensible runtime fallback. Silent
+clamping would hand the caller a smaller preload than they asked for and hide the cause. An
+exception at construction points at the exact line of configuration that is wrong.
 
-Це поведінково ламаюча зміна для застосунків із нині невалідною конфігурацією: замість тихої
-деградації вони отримають падіння. Такі застосунки вже зараз палять трафік і батарею, тож зміна
-робить наявну проблему видимою, а не створює нову. Реліз має бути мінорним, не патчем.
+This is behaviourally breaking for applications running a currently-invalid configuration: they get
+a crash instead of silent degradation. Those applications are already burning bandwidth and
+battery, so the change makes an existing defect visible rather than introducing a new one. It
+warrants a minor release, not a patch.
 
-### Чому саме `cacheSize >= preloadSize`
+### Why `cacheSize >= preloadSize` specifically
 
-У `StreamingPager` реальне вікно стрімів вирівняне по сітці `loadSize` й тому виходить за
-preload-радіус: центральний чанк, що містить ключ, розширюється на `preloadSize` у кожен бік, а
-далі вікно замощується чанками, останній з яких може вийти за межу вікна. Точна умова «жоден
-завантажений елемент не викидається одразу» — це `cacheSize >= preloadSize + 2*loadSize - 2`.
+In `StreamingPager` the actual stream window is aligned to the `loadSize` grid and therefore reaches
+past the preload radius: the centre chunk containing the key is expanded by `preloadSize` in each
+direction, and the window is then tiled with chunks, the last of which may extend beyond the window
+edge. The exact condition for "no loaded item is discarded on arrival" is
+`cacheSize >= preloadSize + 2*loadSize - 2`.
 
-Ця формула не годиться як `require`: її важко пояснити, вона прив'язана до деталі реалізації
-планувальника чанків і відхиляла б конфігурації, які втрачають одиниці відсотків. Тому:
+That formula is a poor fit for a `require`: it is hard to explain, it is tied to an implementation
+detail of the chunk planner, and it would reject configurations that lose a couple of percent.
+Therefore:
 
-- `require` фіксує просте `cacheSize >= preloadSize` — воно прибирає катастрофічний випадок;
-- KDoc рекомендує `cacheSize >= preloadSize + loadSize` для `StreamingPager`, щоб прибрати й
-  залишковий відкид на краях сітки.
+- the `require` enforces the plain `cacheSize >= preloadSize`, which removes the catastrophic case;
+- the KDoc recommends `cacheSize >= preloadSize + loadSize` for `StreamingPager` to also remove the
+  residual waste at the grid edges.
 
-Дефолти бібліотеки (`loadSize=20, preloadSize=60, cacheSize=100`) задовольняють обидві умови.
+The library defaults (`loadSize=20, preloadSize=60, cacheSize=100`) satisfy both conditions.
 
-### Де саме валідувати
+### Where to validate
 
-| Місце | Перевірки |
+| Location | Checks |
 |---|---|
 | `StreamingPagerConfig.init` | `loadSize > 0`, `preloadSize >= 0`, `closeThreshold >= 0`, `keyDebounceMs >= 0`, `cacheSize >= preloadSize` |
 | `Pager.init` | `loadSize > 0`, `preloadSize >= 0`, `cacheSize >= preloadSize` |
 | `PagingMediatorConfig.init` | `loadSize > 0`, `prefetchSize >= 0`, `cacheSize >= prefetchSize` |
 
-`cacheSize >= preloadSize` разом із `preloadSize >= 0` покриває `cacheSize >= 0`, тож окрема
-перевірка знаку `cacheSize` стає надлишковою і прибирається.
+`cacheSize >= preloadSize` together with `preloadSize >= 0` implies `cacheSize >= 0`, so the
+separate sign check on `cacheSize` becomes redundant and is dropped.
 
-Валідація `StreamingPagerConfig` переїжджає з `StreamingPager.init` у `init` самого data-класу:
-`init` виконується і для `copy()`, тож ловить випадки, де конфігурація мутується після створення й
-передається кудись іще. Після перенесення `StreamingPager.init` порожній і видаляється — єдине
-джерело правди лишається одне.
+Validation of `StreamingPagerConfig` moves out of `StreamingPager.init` and into the `init` of the
+data class itself: `init` also runs for `copy()`, so it catches cases where a configuration is
+mutated after creation and passed somewhere else. Once moved, `StreamingPager.init` is empty and is
+removed — leaving a single source of truth.
 
-`PagingMediatorConfig` валідує сам, попри те що зрештою делегує в `Pager`: параметр там зветься
-`prefetchSize`, і повідомлення має називати те ім'я, яке користувач бачить у своєму коді.
+`PagingMediatorConfig` validates on its own even though it ultimately delegates to `Pager`: the
+parameter is called `prefetchSize` there, and the message has to name what the user sees in their
+own code.
 
-### Повідомлення про помилку
+### Error message
 
-Єдиний формат для всіх трьох місць, із фактичними значеннями та поясненням зв'язку:
+One shared format across all three locations, carrying the actual values and explaining the link:
 
 ```
-cacheSize (40) must be >= preloadSize (100): the pager retains only ±cacheSize items around
+cacheSize (40) must be >= preloadSize (100): the pager retains only +/-cacheSize items around
 the last accessed key, so a wider preload radius fetches data that is discarded on arrival
 ```
 
-Для `PagingMediatorConfig` — те саме з `prefetchSize` замість `preloadSize`.
+`PagingMediatorConfig` uses the same text with `prefetchSize` in place of `preloadSize`.
 
-### Документація
+### Documentation
 
-`cacheSize` і `preloadSize` описуються як **радіуси в індексах** навколо останнього прочитаного
-ключа, з явним зазначенням, що кеш утримує до `2*cacheSize+1` елементів. KDoc кожного з трьох
-конфігів фіксує інваріант; KDoc `StreamingPagerConfig` додатково містить рекомендацію
-`cacheSize >= preloadSize + loadSize`.
+`cacheSize` and `preloadSize` are documented as **radii in indices** around the last accessed key,
+stating explicitly that the cache holds up to `2 * cacheSize + 1` items (`2 * cacheSize` in `Pager`,
+whose cache range has an exclusive end). The KDoc of each of the three configurations states the
+invariant; the KDoc of `StreamingPagerConfig` additionally carries the
+`cacheSize >= preloadSize + loadSize` recommendation.
 
-У `README.md` виправляються коментарі-описи біля прикладів конфігурації (рядки ~86–87, ~239–240,
-~295–296), де `cacheSize` названо «max items retained in memory».
+In `README.md`, the descriptive comments next to the configuration examples are corrected (around
+lines 86–87, 239–240, 295–296), where `cacheSize` is called "max items retained in memory".
 
-## Вплив на наявні тести
+## Impact on existing tests
 
-Два місця у власному коді порушують майбутній інваріант:
+Two places in the project's own code violate the new invariant:
 
-1. **`PagerTest.moving_far_evicts_outside_cache_range`** (`cacheSize=40, preloadSize=60`) —
-   змінюється на `cacheSize=60, preloadSize=60`. Асерти лишаються без змін і лишаються валідними:
-   вони перевіряють, що ключі лежать у `400±preloadSize`, а `cacheRange` тепер збігається з
-   preload-вікном.
+1. **`PagerTest.moving_far_evicts_outside_cache_range`** (`cacheSize=40, preloadSize=60`) moves to
+   `cacheSize=60, preloadSize=60`. Its assertions are unchanged and remain valid: they check that
+   the keys lie within `400 ± preloadSize`, and `cacheRange` now coincides with the preload window.
 
-2. **`DiagnosticsFindingsTest.f8_cache_smaller_than_preload_streams_data_that_is_discarded`** —
-   це і є репро з issue, воно закріплює погану поведінку числами `fetched=340, retained=81`.
-   Переписується у стилі «(fixed)», як зроблено для F9: конфігурація `20/100/40` тепер кидає
-   `IllegalArgumentException`, а поруч перевіряється валідна конфігурація `20/100/120`, для якої
-   фіксуються фактичні `fetched`/`retained` — частка викинутого падає з ~76% до одиниць відсотків.
-   Конкретні числа знімаються з реального прогону на етапі імплементації.
+2. **`DiagnosticsFindingsTest.f8_cache_smaller_than_preload_streams_data_that_is_discarded`** is the
+   repro from the issue and pins the broken behaviour with `fetched=340, retained=81`. It is
+   rewritten in the "(fixed)" style already used for F9: the `20/100/40` configuration now throws
+   `IllegalArgumentException`, and a companion case checks a valid `20/100/120` configuration where
+   every item streamed for the viewport is retained. The concrete numbers are taken from a real run
+   during implementation.
 
-Решта тестів і семплів інваріант не порушують: `StreamingPagerTest` скрізь має
-`cacheSize >= preloadSize` (найтісніше — `preloadSize=5, cacheSize=10`), `WindowHelpersTest`
-використовує `20/20/200`, семпл `StreamingUserListViewModel` — дефолти `20/60/100`.
+The rest of the tests and the samples satisfy the invariant already: `StreamingPagerTest` always has
+`cacheSize >= preloadSize` (tightest is `preloadSize=5, cacheSize=10`), `WindowHelpersTest` uses
+`20/20/200`, and the `StreamingUserListViewModel` sample uses the `20/60/100` defaults.
 
-## Нові тести
+## New tests
 
-Для кожної з трьох конфігурацій:
+For each of the three configurations:
 
-- невалідне співвідношення кидає `IllegalArgumentException`, і повідомлення містить обидва імена
-  параметрів та їхні значення;
-- межовий випадок `cacheSize == preloadSize` створюється успішно.
+- an invalid ratio throws `IllegalArgumentException`, and the message contains both parameter names
+  along with their values;
+- the boundary case `cacheSize == preloadSize` constructs successfully.
 
-Для `StreamingPagerConfig` додатково: `copy(cacheSize = ...)`, що порушує інваріант, теж кидає —
-це те, заради чого валідація переїхала в data-клас.
+For `StreamingPagerConfig` additionally: a `copy(cacheSize = ...)` that breaks the invariant throws
+too — which is the reason validation moved into the data class.
 
-## Критерії готовності
+## Definition of done
 
-1. `./gradlew check` проходить (включно з detekt і Spotless).
-2. Конфігурація з issue (`20/100/40`) кидає `IllegalArgumentException` для всіх трьох пейджерів.
-3. Дефолтні конфігурації створюються без змін у поведінці.
-4. KDoc усіх трьох `cacheSize` описує радіус і фіксує інваріант; `README.md` узгоджений.
-5. `CHANGELOG.md` містить запис під `[Unreleased] / ### Changed` із посиланням на #13.
+1. `./gradlew check` passes, including detekt and Spotless.
+2. The configuration from the issue (`20/100/40`) throws `IllegalArgumentException` for all three
+   pagers.
+3. Default configurations construct with no behavioural change.
+4. The KDoc of all three `cacheSize` parameters describes a radius and states the invariant;
+   `README.md` agrees.
+5. `CHANGELOG.md` carries an entry under `[Unreleased] / ### Changed` referencing #13.
