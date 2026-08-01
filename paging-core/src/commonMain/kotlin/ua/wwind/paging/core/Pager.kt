@@ -31,10 +31,16 @@ import kotlin.math.abs
  * - All operations are debounced to prevent excessive API calls
  * - Thread-safe using Mutex for concurrent access
  *
+ * [preloadSize] and [cacheSize] are both radii in indices around the last accessed position, and
+ * `cacheSize >= preloadSize` is required: a cache narrower than the preload window would discard
+ * most of every portion the moment it arrives.
+ *
  * @param T The type of items being paged
  * @param loadSize Number of items to load in each request (default: 20)
- * @param preloadSize Number of items to preload around current position (default: 60)
- * @param cacheSize Maximum number of items to keep in memory (default: 100)
+ * @param preloadSize Preload radius in indices around the current position, in both directions
+ * (default: 60)
+ * @param cacheSize Cache radius in indices around the current position; items outside are evicted,
+ * so the cache holds up to `2 * cacheSize` items (default: 100). Must be `>= preloadSize`.
  * @param readData function to load data portions from the data source
  */
 @OptIn(FlowPreview::class)
@@ -44,6 +50,14 @@ public class Pager<T>(
     private val cacheSize: Int = 100,
     private val readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>,
 ) {
+    init {
+        require(loadSize > 0) { "loadSize must be > 0" }
+        require(preloadSize >= 0) { "preloadSize must be >= 0" }
+        require(cacheSize >= preloadSize) {
+            cacheRadiusTooSmallMessage(cacheSize, preloadName = "preloadSize", preloadSize = preloadSize)
+        }
+    }
+
     // External refresh trigger (fan-out to active collections)
     private val refreshRequests: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 64)
 

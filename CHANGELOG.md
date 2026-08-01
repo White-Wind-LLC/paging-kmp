@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `Pager`, `StreamingPagerConfig` and `PagingMediatorConfig` now reject a cache narrower than the preload window
+  (`cacheSize >= preloadSize`, `cacheSize >= prefetchSize` for the mediator) with an `IllegalArgumentException` at
+  construction time. Such a configuration used to be accepted silently while the pager streamed a window it could not
+  retain — measured at ~76% of the payload discarded on arrival, with the streams that produced it left open (#13).
+  `Pager` also validates `loadSize > 0` and `preloadSize >= 0`, which it did not check at all before.
+- `StreamingPagerConfig` validates itself in its own `init` instead of in `StreamingPager`, so `copy()` is covered too.
+
+### Documentation
+
+- Clarified that `preloadSize`/`prefetchSize` and `cacheSize` are radii in indices around the current position, not
+  item counts — `Pager`'s KDoc previously described `cacheSize` as the "maximum number of items to keep in memory",
+  while the cache actually holds up to `2 * cacheSize` items. The invariant is now stated in the KDoc of all three
+  configurations and in `README.md`.
+
 ### Fixed
 
 - StreamingPager: the pager no longer reports `LoadState.Loading` forever after the total shrinks. The out-of-bounds
