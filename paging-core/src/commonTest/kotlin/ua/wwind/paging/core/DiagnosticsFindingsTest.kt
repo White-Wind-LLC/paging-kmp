@@ -339,23 +339,18 @@ class DiagnosticsFindingsTest {
     // ------------------------------------------------------------------- F9
 
     /**
-     * F9: the merge in `StreamingPagerState.onPortion` / `Pager.loadPortion`
-     * (`(current + incoming).filterKeys{}.toPersistentMap()`) rebuilds the whole
-     * cache on every emission: three full copies, cost O(cacheSize) regardless
-     * of how small the incoming delta is. A builder-based merge is ~3.5x cheaper
-     * and keeps structural sharing.
+     * F9 (fixed): the merge in `StreamingPagerState.onPortion` / `Pager.loadPortion` used to be
+     * `(current + incoming).filterKeys{}.toPersistentMap()`, which rebuilt the whole cache on every
+     * emission - three full copies, cost O(cacheSize) regardless of how small the incoming delta is.
+     *
+     * It now goes through [mergeIntoCache], which applies the delta in a single builder pass and keeps
+     * structural sharing. This benchmark measures the shipped code against the old expression; the
+     * `pruneExisting = false` column is what a stationary viewport actually pays.
      */
     @Test
     fun f9_merge_cost_is_proportional_to_cache_not_to_the_delta() {
-        fun current(c: PersistentMap<Int, String>, inc: Map<Int, String>, r: IntRange) =
+        fun legacy(c: PersistentMap<Int, String>, inc: Map<Int, String>, r: IntRange) =
             (c + inc).filterKeys { it in r }.toPersistentMap()
-
-        fun builder(c: PersistentMap<Int, String>, inc: Map<Int, String>, r: IntRange): PersistentMap<Int, String> {
-            val b = c.builder()
-            b.keys.filter { it !in r }.forEach { b.remove(it) }
-            for ((k, v) in inc) if (k in r) b[k] = v
-            return b.build()
-        }
 
         fun bench(iterations: Int, block: (Int) -> Any?): Double {
             repeat(iterations / 2) { block(it) }
@@ -369,9 +364,13 @@ class DiagnosticsFindingsTest {
             val cache = (0 until cacheSize * 2).associateWith { "v$it" }.toPersistentMap()
             val range = 0..(cacheSize * 2)
             val delta = mapOf(5 to "updated")
-            val cur = bench(3_000) { current(cache, delta, range) }
-            val bld = bench(3_000) { builder(cache, delta, range) }
-            println("  cacheSize=$cacheSize entries=${cache.size}: current=$cur builder=$bld speedup=${cur / bld}")
+            val old = bench(3_000) { legacy(cache, delta, range) }
+            val merged = bench(3_000) { cache.mergeIntoCache(delta, range) }
+            val stationary = bench(3_000) { cache.mergeIntoCache(delta, range, pruneExisting = false) }
+            println(
+                "  cacheSize=$cacheSize entries=${cache.size}: legacy=$old merge=$merged " +
+                    "stationary=$stationary speedup=${old / merged} / ${old / stationary}"
+            )
         }
     }
 }

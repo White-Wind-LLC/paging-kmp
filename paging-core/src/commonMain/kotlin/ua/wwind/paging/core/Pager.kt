@@ -1,8 +1,8 @@
 package ua.wwind.paging.core
 
 import arrow.core.toNonEmptyListOrNull
+import kotlinx.collections.immutable.PersistentMap
 import kotlinx.collections.immutable.persistentMapOf
-import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -246,7 +246,10 @@ public class Pager<T>(
             // Do not constrain cacheRange by the (possibly unknown) fullRange; total size may be 0 initially
             // and will be corrected by remote portions. We keep absolute window around the key.
             val cacheRange = (coercedKey - cacheSize)..<(coercedKey + cacheSize)
-            var dataMap: Map<Int, T> = currentDataMap.filterKeys { it in cacheRange }
+            var dataMap: PersistentMap<Int, T> = currentDataMap.pruneToRange(cacheRange)
+            // `cacheRange` is fixed for this call, so once `dataMap` is pruned every later merge only
+            // has to write its own delta. Replacing the map wholesale on a total change breaks that.
+            var dataMapPruned = true
 
             // Execute loading operations
             enqueue
@@ -262,18 +265,23 @@ public class Pager<T>(
                             _data.update { currentData ->
                                 if (currentData.size != portion.totalSize) {
                                     dataMap = portion.values
+                                    dataMapPruned = false
                                     PagingMap(
                                         size = portion.totalSize,
                                         values = portion.values,
                                         onGet = onGet
                                     )
                                 } else {
-                                    val updatedValues: Map<Int, T> = (dataMap + portion.values)
-                                        .filterKeys { it in cacheRange }
+                                    val updatedValues = dataMap.mergeIntoCache(
+                                        incoming = portion.values,
+                                        cacheRange = cacheRange,
+                                        pruneExisting = !dataMapPruned,
+                                    )
                                     dataMap = updatedValues
+                                    dataMapPruned = true
                                     PagingMap(
                                         size = portion.totalSize,
-                                        values = updatedValues.toPersistentMap(),
+                                        values = updatedValues,
                                         onGet = onGet
                                     )
                                 }
