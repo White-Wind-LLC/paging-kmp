@@ -14,10 +14,19 @@ kotlin {
     jvm()
     androidTarget()
     js {
-        nodejs()
+        nodejs {
+            // DiagnosticsFindingsTest runs micro-benchmarks that exceed Mocha's 2s default.
+            testTask {
+                useMocha { timeout = "120s" }
+            }
+        }
     }
     wasmJs {
-        nodejs()
+        nodejs {
+            testTask {
+                useMocha { timeout = "120s" }
+            }
+        }
     }
     linuxX64()
     linuxArm64()
