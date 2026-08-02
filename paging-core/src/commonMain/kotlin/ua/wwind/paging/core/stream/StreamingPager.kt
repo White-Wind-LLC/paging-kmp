@@ -14,7 +14,8 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import ua.wwind.paging.core.BuildKonfig
 import ua.wwind.paging.core.ExperimentalStreamingPagerApi
@@ -109,12 +110,16 @@ public class StreamingPager<T>(
 
         val retryRequests: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 1)
 
+        // Own channel: the access pipeline drops repeats, so a retry for the position the consumer
+        // is already sitting on would be swallowed there.
+        val retryKeys: MutableSharedFlow<Int> = MutableSharedFlow(extraBufferCapacity = 64)
+
         val emitter = launch {
             combine(state.data, state.loadStateFlow) { data: PagingMap<T>, loadState ->
                 PagingData(data, loadState) { key ->
-                    // Straight to the trigger, not through `onGet`: a retry has to reach the
-                    // planner even when the key sits in the settled range.
-                    state.keyTrigger.update { key }
+                    // Not through `onGet`: a retry has to reach the planner even from inside the
+                    // settled range.
+                    retryKeys.tryEmit(key)
                     retryRequests.tryEmit(Unit)
                 }
             }.collect { paging ->
@@ -148,14 +153,19 @@ public class StreamingPager<T>(
         }
 
         val keysJob = launch {
-            state.keyTrigger
-                .debounce(config.keyDebounceMs)
-                .distinctUntilChanged()
-                .collect { key ->
-                    logger.d { "keyTrigger: key=$key" }
-                    if (key < 0) return@collect
-                    state.tryAdjustStreamsForKey(key, this)
-                }
+            merge(
+                state.keyTrigger
+                    .debounce(config.keyDebounceMs)
+                    // The trigger only says that something uncached was read; plan for where the
+                    // consumer is, not for whichever read the cache let through (#45).
+                    .map { state.lastAccessedKey }
+                    .distinctUntilChanged(),
+                retryKeys,
+            ).collect { key ->
+                logger.d { "adjust requested: key=$key" }
+                if (key < 0) return@collect
+                state.tryAdjustStreamsForKey(key, this)
+            }
         }
 
         awaitClose {

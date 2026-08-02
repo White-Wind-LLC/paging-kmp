@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Both pagers no longer oscillate between two windows when the consumer reads a span wider than the window (#45).
+  Since 2.3.0 a read that falls inside the loaded window does not reach the planner (#16), so the last read that *did*
+  reach it was whichever position the cache happened not to hold - and the pager prunes that cache around the very key
+  it took from those reads. A consumer reading more positions than the window covers - a `LazyColumn` resolving an item
+  for every key of its nearby range, not just for the rows on screen - therefore had the two ends of its read span
+  evict each other in turn, and the window flipped between them for as long as the consumer kept reading: in the
+  reported session 69 portion requests, 63 of them cancelled, alternating with a ~500 ms period from a stationary
+  viewport. Both pagers now track every read, gated or not, and plan around where the consumer actually is; the gate
+  still decides whether the planner is woken at all, so the per-row cost #16 removed stays removed. Positions past the
+  window are simply left unloaded again, as they were in 2.2.7.
+- `StreamingPager` acts on a `PagingData.retry` that names the position the consumer is already sitting on. Retries
+  travelled through the debounced key trigger, a `StateFlow` that conflates equal values, so a retry for the current
+  position emitted nothing at all and no stream was reopened; it now has its own channel, as `Pager` already did, and
+  is served without waiting out the debounce.
+
 ## [2.3.0] - 2026-08-02
 
 ### Breaking Changes
