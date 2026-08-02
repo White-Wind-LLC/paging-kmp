@@ -22,6 +22,7 @@ import ua.wwind.paging.core.PagingMap
 import ua.wwind.paging.core.mergeIntoCache
 import ua.wwind.paging.core.pruneToRange
 import ua.wwind.paging.core.settledRangeAround
+import kotlin.concurrent.Volatile
 
 /**
  * Returns this map with [range] set to [state], or this very instance when it already holds it.
@@ -47,6 +48,16 @@ internal class StreamingPagerState<T>(
     var previousKey: Int = 0
 
     /**
+     * The position the consumer read last, whether or not [settledRange] gated that read.
+     *
+     * The window is planned around this rather than around the last read that survived the gate:
+     * those are decided by the cache, which this pager prunes around the key it plans for, and the
+     * loop that closes makes the window flip between the two ends of a wide read span (#45).
+     */
+    @Volatile
+    var lastAccessedKey: Int = 0
+
+    /**
      * Positions whose access cannot move the streamed window; see [settledRangeAround].
      *
      * A page of lead time before the edge of the window is what keeps it shifting ahead of a
@@ -56,6 +67,7 @@ internal class StreamingPagerState<T>(
     val settledRange: MutableStateFlow<IntRange> = MutableStateFlow(IntRange.EMPTY)
 
     fun onGet(key: Int) {
+        lastAccessedKey = key
         // A list re-reads every visible row on each recomposition, so this runs per row per frame.
         // Deep inside the streamed window the answer is always "nothing to do", and the CAS below -
         // which also restarts the debounce - is pure overhead there.
@@ -201,7 +213,11 @@ internal class StreamingPagerState<T>(
         // `lastReadKey == newTotal` is already past the end, hence `>=`. The last valid index is
         // `newTotal - 1`; on an empty total we fall back to 0 rather than a negative key, which
         // `StreamingPager` would drop, leaving the trigger stuck.
-        if (lastReadKey >= newTotal) keyTrigger.value = (newTotal - 1).coerceAtLeast(0)
+        if (lastReadKey >= newTotal) {
+            val clamped = (newTotal - 1).coerceAtLeast(0)
+            lastAccessedKey = clamped
+            keyTrigger.value = clamped
+        }
     }
 
     /**

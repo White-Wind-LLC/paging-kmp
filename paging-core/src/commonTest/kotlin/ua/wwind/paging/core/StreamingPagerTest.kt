@@ -372,6 +372,51 @@ class StreamingPagerTest {
     }
 
     @Test
+    fun retry_reopens_a_failed_stream_at_the_position_already_being_read() = runTest {
+        val opens = mutableListOf<Int>()
+        var failing = true
+        val total = MutableStateFlow(50)
+
+        val pager: StreamingPager<Int> = StreamingPager(
+            config = StreamingPagerConfig(
+                loadSize = 5,
+                preloadSize = 5,
+                cacheSize = 100,
+                closeThreshold = 5,
+                keyDebounceMs = 300,
+            ),
+            readTotal = { total },
+            readPortion = { start, size ->
+                flow {
+                    opens += start
+                    if (start == 0 && failing) error("boom at $start")
+                    emitAll(MutableStateFlow((start..<(start + size).coerceAtMost(50)).associateWith { it }))
+                }
+            },
+        )
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        testScheduler.advanceUntilIdle()
+
+        checkNotNull(latest).data[0]
+        testScheduler.advanceUntilIdle()
+        // The chunk holding 0 failed and was dropped, so nothing is streaming it any more
+        latest.data.values.containsKey(0) shouldBe false
+        val attemptsBefore = opens.count { it == 0 }
+
+        failing = false
+        // The consumer has not moved, so the retry names the position it is already reading
+        checkNotNull(latest).retry(0)
+        testScheduler.advanceUntilIdle()
+
+        opens.count { it == 0 } shouldBe attemptsBefore + 1
+        latest.data.values.containsKey(0) shouldBe true
+
+        job.cancel()
+    }
+
+    @Test
     fun config_rejects_a_cache_narrower_than_the_preload_window() {
         val error = shouldThrow<IllegalArgumentException> {
             StreamingPagerConfig(loadSize = 20, preloadSize = 100, cacheSize = 40)

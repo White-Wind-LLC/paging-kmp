@@ -31,6 +31,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlin.concurrent.Volatile
 import kotlin.math.abs
 
 /**
@@ -104,8 +105,8 @@ public class Pager<T>(
         // Debounced trigger for the last accessed key only
         val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(0)
 
-        // Retries travel on their own channel: keyTrigger already holds the key that failed, and a
-        // StateFlow conflates equal values, so routing a retry through it would emit nothing.
+        // Own channel: the access pipeline drops repeats, so a retry for the position the consumer
+        // is already sitting on would be swallowed there.
         val retryRequests: MutableSharedFlow<Int> = MutableSharedFlow(extraBufferCapacity = 64)
 
         // Positions an access to which cannot change anything this pager would do; see
@@ -113,8 +114,15 @@ public class Pager<T>(
         // the cache is known to hold the window.
         val settledRange: MutableStateFlow<IntRange> = MutableStateFlow(IntRange.EMPTY)
 
+        // The position the consumer read last, gated or not. Loads are planned around this rather
+        // than around the last read that survived the gate: those are decided by the cache, which
+        // this pager prunes around the key it plans for, and the loop that closes makes the window
+        // flip between the two ends of a wide read span (#45).
+        val lastAccessed = LastAccessedKey()
+
         // Entry access
         fun onGet(key: Int) {
+            lastAccessed.value = key
             // A list re-reads every visible row on each recomposition, so this runs per row per
             // frame. Deep inside the loaded window the answer is always "nothing to do", and the
             // CAS below - which also restarts the debounce - is pure overhead there.
@@ -124,7 +132,7 @@ public class Pager<T>(
 
         // PagingData.retry: keep the tracked position in sync, then force a load for it
         fun onRetry(key: Int) {
-            keyTrigger.update { key }
+            lastAccessed.value = key
             retryRequests.tryEmit(key)
         }
 
@@ -159,6 +167,9 @@ public class Pager<T>(
         val accessRequests: Flow<LoadRequest> = keyTrigger
             .debounce { if (debounceKeys) keyDebounceMs else 0L }
             .onEach { debounceKeys = true }
+            // The trigger only says that something uncached was read; load around where the
+            // consumer is - see `lastAccessed`.
+            .map { lastAccessed.value }
             .distinctUntilChanged()
             .map { key -> LoadRequest(key, Reason.Access) }
 
@@ -168,7 +179,7 @@ public class Pager<T>(
             merge(
                 accessRequests,
                 retryRequests.map { key -> LoadRequest(key, Reason.Retry) },
-                refreshRequests.map { LoadRequest(keyTrigger.value, Reason.Refresh) },
+                refreshRequests.map { LoadRequest(lastAccessed.value, Reason.Refresh) },
             ).collect { request ->
                 val key = request.key
                 if (key < 0) return@collect
@@ -483,6 +494,17 @@ public class Pager<T>(
  * together with the cache window the result is constrained to.
  */
 private data class LoadPlan(val chunks: List<IntRange>, val cacheRange: IntRange)
+
+/**
+ * Written per row per frame from whatever thread reads the map, read from the loading coroutine.
+ *
+ * A captured local `var` would race across the two; a `MutableStateFlow` would put back on the
+ * per-row read path the CAS that #16 took off it.
+ */
+private class LastAccessedKey {
+    @Volatile
+    var value: Int = 0
+}
 
 /**
  * Builds the successive cache snapshots of one [Pager.loadPortion] call.
