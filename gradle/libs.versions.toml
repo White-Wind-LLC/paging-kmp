@@ -1,5 +1,5 @@
 [versions]
-version = "2.3.0"
+version = "2.3.1"
 androidx-activityCompose = "1.13.0"
 compose = "1.11.1"
 kotlin = "2.4.10"

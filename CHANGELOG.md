@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-08-03
+
 ### Fixed
 
 - Both pagers no longer oscillate between two windows when the consumer reads a span wider than the window (#45).
