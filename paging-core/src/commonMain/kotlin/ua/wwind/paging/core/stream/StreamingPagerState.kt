@@ -142,7 +142,10 @@ internal class StreamingPagerState<T>(
         mutex.withLock {
             activeStreams.remove(range)
             rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
-                current?.filterNot { it.key == range }
+                // A stream that ended in an error keeps its state: it is the only record the
+                // consumer has of the failure, and dropping it here reported the list as an empty
+                // `Success`. A retry reopens the range and overwrites it with `Loading`.
+                current?.filterNot { it.key == range && it.value !is LoadState.Error }
             }
             logger.d { "openStream: finished range=$range" }
         }

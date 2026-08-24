@@ -442,4 +442,30 @@ class StreamingPagerTest {
             valid.copy(cacheSize = 40)
         }
     }
+
+    @Test
+    fun a_backend_failing_both_streams_settles_on_error_not_on_an_empty_success() = runTest {
+        val pager: StreamingPager<Int> = StreamingPager(
+            config = StreamingPagerConfig(
+                loadSize = 5,
+                preloadSize = 5,
+                cacheSize = 100,
+                closeThreshold = 5,
+                keyDebounceMs = 0,
+            ),
+            readTotal = { flow { error("total boom") } },
+            readPortion = { _, _ -> flow { error("portion boom") } },
+        )
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        testScheduler.advanceUntilIdle()
+
+        // The portion stream is torn down after it fails; its error is what the consumer renders,
+        // so it must outlive the stream instead of leaving the list as an empty `Success`.
+        latest?.loadState.shouldBeInstanceOf<LoadState.Error>()
+        latest?.data?.size shouldBe 0
+
+        job.cancel()
+    }
 }
