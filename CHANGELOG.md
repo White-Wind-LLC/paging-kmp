@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- `StreamingPager` no longer reports a failed portion stream as an empty `Success`. `openStream` recorded
+  `LoadState.Error` in its `catch` and then, in its `finally`, `removeStreamByRange` dropped that very entry from
+  `rangeLoadStates` - so the aggregate map ended up empty and the consumer saw `Success` with zero items instead of an
+  error and a retry. A stream that ended in an error now keeps its state until a retry reopens the range and overwrites
+  it with `Loading`.
+
 ## [2.3.1] - 2026-08-03
 
 ### Fixed
