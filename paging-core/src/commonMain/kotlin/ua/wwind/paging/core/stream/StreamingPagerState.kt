@@ -96,11 +96,6 @@ internal class StreamingPagerState<T>(
 
     val activeStreams: MutableMap<IntRange, Job> = LinkedHashMap()
 
-    fun cleanupInactiveStreamsLocked() {
-        val toRemove = activeStreams.filterValues { job -> !job.isActive }.keys
-        toRemove.forEach { r -> activeStreams.remove(r) }
-    }
-
     /**
      * Cache window the cached values were last constrained to.
      *
@@ -183,7 +178,7 @@ internal class StreamingPagerState<T>(
         activeStreams[range] = job
     }
 
-    suspend fun onTotalChanged(newTotalRaw: Int) = mutex.withLock {
+    suspend fun onTotalChanged(newTotalRaw: Int, scope: CoroutineScope) = mutex.withLock {
         val newTotal = newTotalRaw.coerceAtLeast(0)
         val current = data.value
         if (current.size == newTotal) return@withLock
@@ -214,12 +209,18 @@ internal class StreamingPagerState<T>(
             }
         }
         // `lastReadKey == newTotal` is already past the end, hence `>=`. The last valid index is
-        // `newTotal - 1`; on an empty total we fall back to 0 rather than a negative key, which
-        // `StreamingPager` would drop, leaving the trigger stuck.
-        if (lastReadKey >= newTotal) {
-            val clamped = (newTotal - 1).coerceAtLeast(0)
-            lastAccessedKey = clamped
-            keyTrigger.value = clamped
+        // `newTotal - 1`; on an empty total we fall back to 0 rather than a negative key.
+        val lastValidKey = (newTotal - 1).coerceAtLeast(0)
+        val keyFellOffTheEnd = lastReadKey >= newTotal
+        if (keyFellOffTheEnd) lastAccessedKey = lastValidKey
+
+        // Closing a range the new end only clipped leaves its surviving positions with no stream,
+        // while their rows stay cached - so `settledRange` swallows every later access to them and
+        // nothing ever reopens the remainder (#48). Replanning here restores the coverage the
+        // window calls for, and re-anchors a key that fell past the end. An emptied list has
+        // nothing left to cover, so it keeps the closed streams closed.
+        if (newTotal > 0 && (toClose.isNotEmpty() || keyFellOffTheEnd)) {
+            adjustStreamsForKeyLocked(lastAccessedKey.coerceIn(0, lastValidKey), scope)
         }
     }
 
@@ -242,7 +243,17 @@ internal class StreamingPagerState<T>(
 
     suspend fun tryAdjustStreamsForKey(key: Int, scope: CoroutineScope) = mutex.withLock {
         logger.d { "tryAdjustStreamsForKey: key=$key" }
-        cleanupInactiveStreamsLocked()
+        adjustStreamsForKeyLocked(key, scope)
+    }
+
+    /**
+     * Reconciles the open streams with the window [key] calls for. Expects [mutex] to be held.
+     */
+    private fun adjustStreamsForKeyLocked(key: Int, scope: CoroutineScope) {
+        // A stream that has already ended clears its own entry, but only once `removeStreamByRange`
+        // gets the mutex this call is holding - so drop the dead ones before planning around them.
+        val finished = activeStreams.filterValues { job -> !job.isActive }.keys
+        finished.forEach { r -> activeStreams.remove(r) }
 
         val directionForward = key > lastReadKey
 
