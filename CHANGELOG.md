@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- `StreamingPager` reopens the part of a chunk that survives a shrinking total (#48). When `total` dropped while the
+  consumer was parked at the end of the list, `onTotalChanged` cancelled every stream whose range touched the new end
+  and left the remainder uncovered: a `1020..1029` stream closed on `total 1030 -> 1029` took `1020..1028` down with
+  it. Those rows stay cached, and the settled range is read from the cache alone, so every later access to them
+  returned early and the trigger that would have reopened the range could never fire - the tail went stale for good,
+  surviving both scrolling onto it and the reconnect after an SSE timeout, and only recreating the pager recovered it.
+  A shrink that clips a live stream now replans the window before releasing the lock, reopening the clipped remainder
+  at its new size; a list shrunk to empty still leaves the closed streams closed.
+
 ## [2.3.2] - 2026-08-25
 
 ### Fixed
