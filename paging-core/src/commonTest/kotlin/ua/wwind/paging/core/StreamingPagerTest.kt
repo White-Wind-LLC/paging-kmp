@@ -232,8 +232,12 @@ class StreamingPagerTest {
         latest.data.size shouldBe 9
         src.subscribers(5, 5) shouldBe 0
         src.subscribers(10, 5) shouldBe 0
-        // [0..4] is fully in bounds and stays put, so nothing is left loading.
+        // [0..4] is fully in bounds and stays put.
         src.subscribers(0, 5) shouldBe 1
+        // The part of [5..9] the new end only clipped is streamed again at its new size.
+        src.subscribers(5, 4) shouldBe 1
+        src.emitPortion(5, 4, (5..8).associateWith { it })
+        advanceFully(10)
         latest.loadState shouldBe LoadState.Success
 
         job.cancel()
@@ -465,6 +469,76 @@ class StreamingPagerTest {
         // so it must outlive the stream instead of leaving the list as an empty `Success`.
         latest?.loadState.shouldBeInstanceOf<LoadState.Error>()
         latest?.data?.size shouldBe 0
+
+        job.cancel()
+    }
+
+    /**
+     * A shrink that clips the chunk the consumer is parked on used to cancel that stream and leave
+     * the surviving part uncovered. Its rows stay cached, so `settledRange` kept swallowing every
+     * later access to them and the tail went permanently stale.
+     */
+    @Test
+    fun total_shrink_reopens_the_clipped_remainder_of_the_tail_chunk() = runTest {
+        val src = TestSource<Int>()
+        src.totalFlow.value = 22
+        val (pager, advanceFully) = buildPager(this, source = src)
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        advanceFully(10)
+
+        // Park at the very end, where the last chunk is a remainder: [15..19] and [20..21].
+        checkNotNull(latest).data[20]
+        advanceFully(10)
+        src.emitPortion(15, 5, (15..19).associateWith { it })
+        src.emitPortion(20, 2, (20..21).associateWith { it })
+        advanceFully(10)
+        src.subscribers(20, 2) shouldBe 1
+
+        // One item removed on the server: [20..21] is out of bounds, but index 20 still exists.
+        src.totalFlow.value = 21
+        advanceFully(10)
+
+        src.subscribers(20, 2) shouldBe 0
+        // The clipped remainder has to be streaming again, otherwise the row the consumer is
+        // looking at never sees another update.
+        src.subscribers(20, 1) shouldBe 1
+
+        // And updates for it actually land.
+        src.emitPortion(20, 1, mapOf(20 to 2020))
+        advanceFully(10)
+        latest.loadState shouldBe LoadState.Success
+        latest.data[20].shouldBeInstanceOf<EntryState.Success<Int>>().value shouldBe 2020
+
+        job.cancel()
+    }
+
+    /**
+     * The replan that reopens a clipped tail has nothing to cover once the list is emptied, so an
+     * empty total leaves the closed streams closed instead of re-requesting the first page.
+     */
+    @Test
+    fun total_shrinking_to_zero_leaves_nothing_streaming() = runTest {
+        val src = TestSource<Int>()
+        src.totalFlow.value = 20
+        val (pager, advanceFully) = buildPager(this, source = src)
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        advanceFully(10)
+        src.emitPortion(0, 5, (0..4).associateWith { it })
+        src.emitPortion(5, 5, (5..9).associateWith { it })
+        advanceFully(10)
+        src.subscribers(0, 5) shouldBe 1
+
+        src.totalFlow.value = 0
+        advanceFully(10)
+
+        checkNotNull(latest).data.size shouldBe 0
+        src.subscribers(0, 5) shouldBe 0
+        src.subscribers(5, 5) shouldBe 0
+        latest.loadState shouldBe LoadState.Success
 
         job.cancel()
     }

@@ -345,7 +345,8 @@ pager.flow.collect { pagingData ->
 
 > The same model works with **WebSockets** or any other push transport — just back `readTotal` / `readPortion` with the
 > flow of your choice. Positions must be absolute across the dataset; when the total shrinks, out-of-bounds streams are
-> cancelled and cached values pruned automatically.
+> cancelled and cached values pruned automatically, and a stream the new end only clipped is reopened for the part of
+> it that survives.
 
 A complete, editable live-list demo ships in the `paging-samples` module (`StreamingUserListScreen`).
 

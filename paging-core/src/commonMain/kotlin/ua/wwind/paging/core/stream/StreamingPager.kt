@@ -72,7 +72,8 @@ public data class StreamingPagerConfig(
  * - The pager opens and keeps portion flows for chunks of size `config.loadSize` inside an active window
  *   centered around the last accessed key, preloading up to `config.preloadSize` in both directions.
  * - Flows are closed when they move farther than `config.closeThreshold` beyond the active window.
- * - When the total size shrinks, out-of-bounds flows are cancelled and cached items are pruned.
+ * - When the total size shrinks, out-of-bounds flows are cancelled and cached items are pruned; a flow the new
+ *   end only clipped is reopened for the part of its range that survives.
  * - Load state is aggregated from per-range states with priority: Loading > Error > Success.
  *
  * @property config Paging behavior configuration (see `StreamingPagerConfig`).
@@ -134,7 +135,7 @@ public class StreamingPager<T>(
                         .distinctUntilChanged()
                         .collect { newTotal ->
                             val emptyBefore = state.data.value.size == 0
-                            state.onTotalChanged(newTotal)
+                            state.onTotalChanged(newTotal, this)
                             if (emptyBefore && newTotal > 0) {
                                 state.tryAdjustStreamsForKey(0, this)
                             }
