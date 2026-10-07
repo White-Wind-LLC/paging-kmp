@@ -140,8 +140,9 @@ public class Pager<T>(
         val data: MutableStateFlow<PagingMap<T>> =
             MutableStateFlow(PagingMap(0, persistentMapOf(), onGet = ::onGet))
 
-        // Current loading state (Loading, Success, or Error)
-        val loadState: MutableStateFlow<LoadState> = MutableStateFlow(LoadState.Success)
+        // Current loading state (Loading, Success, or Error). Loading until the first pass settles:
+        // the initial window is always requested at once.
+        val loadState: MutableStateFlow<LoadState> = MutableStateFlow(LoadState.Loading)
 
         // Mutex to ensure thread-safe access to internal state
         val mutex = Mutex()
@@ -155,7 +156,7 @@ public class Pager<T>(
 
         // Combine and emit data
         val emitter = launch {
-            combine(data, loadState.onStart { emit(LoadState.Success) }) { data, loadState ->
+            combine(data, loadState.onStart { emit(LoadState.Loading) }) { data, loadState ->
                 PagingData(data, loadState, ::onRetry)
             }.collect { paging -> send(paging) }
         }

@@ -5,13 +5,16 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -549,4 +552,21 @@ class PagerTest {
             }
         },
     )
+
+    @Test
+    fun first_emission_is_loading() = runTest {
+        val (pager, _) = buildPager(this)
+        pager.flow.first().loadState shouldBe LoadState.Loading
+    }
+
+    @Test
+    fun empty_source_settles_to_success() = runTest {
+        val pager = Pager<Int>(readData = { _, _ -> flowOf(DataPortion(totalSize = 0, values = persistentMapOf())) })
+        val seen = mutableListOf<PagingData<Int>>()
+        val job = launch { pager.flow.collectLatest { seen += it } }
+        testScheduler.advanceUntilIdle()
+        seen.last().loadState shouldBe LoadState.Success
+        seen.last().data.size shouldBe 0
+        job.cancel()
+    }
 }
