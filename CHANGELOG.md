@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- `Pager` starts in `LoadState.Loading`, so a consumer no longer sees an empty `Success` before the first load.
+- `Pager` starts in `LoadState.Loading`, so a consumer no longer sees an empty `Success` before the first load. A pass that finds nothing left to load no longer leaves a cancelled pass's `Loading` behind.
 
 ## [2.3.3] - 2026-09-06
 

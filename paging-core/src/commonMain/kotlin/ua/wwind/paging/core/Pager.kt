@@ -400,8 +400,13 @@ public class Pager<T>(
         mutex: Mutex,
         onGet: (Int) -> Unit,
     ) {
-        // Only proceed if there's something to load
-        val chunks = plan.chunks.toNonEmptyListOrNull() ?: return
+        val chunks = plan.chunks.toNonEmptyListOrNull()
+        if (chunks == null) {
+            // Nothing to fetch. A superseded pass may have set Loading and been cancelled before its
+            // own Success, so settle that here; an Error is left for the consumer to retry.
+            loadStateFlow.compareAndSet(LoadState.Loading, LoadState.Success)
+            return
+        }
 
         // Apply cache size limit (immutable). We must avoid mutating the same Map instance
         // across emissions, otherwise StateFlow's equality check can suppress updates.
