@@ -5,13 +5,16 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -549,4 +552,84 @@ class PagerTest {
             }
         },
     )
+
+    @Test
+    fun first_emission_is_loading() = runTest {
+        val (pager, _) = buildPager(this)
+        pager.flow.first().loadState shouldBe LoadState.Loading
+    }
+
+    @Test
+    fun empty_source_settles_to_success() = runTest {
+        val pager = Pager<Int>(readData = { _, _ -> flowOf(DataPortion(totalSize = 0, values = persistentMapOf())) })
+        val seen = mutableListOf<PagingData<Int>>()
+        val job = launch { pager.flow.collectLatest { seen += it } }
+        testScheduler.advanceUntilIdle()
+        seen.last().loadState shouldBe LoadState.Success
+        seen.last().data.size shouldBe 0
+        job.cancel()
+    }
+
+    private enum class Source { Fast, Slow, Failing }
+
+    private fun switchablePager(mode: () -> Source): Pager<Int> = Pager(
+        readData = { pos, size ->
+            flow {
+                when (mode()) {
+                    Source.Fast -> Unit
+                    Source.Slow -> delay(10_000)
+                    Source.Failing -> throw IllegalStateException("boom")
+                }
+                val values = (pos..(pos + size - 1).coerceAtMost(999)).associateWith { it }
+                emit(DataPortion(totalSize = 1_000, values = values.toPersistentMap()))
+            }
+        },
+    )
+
+    @Test
+    fun superseded_pass_with_nothing_left_to_load_settles_to_success() = runTest {
+        var mode = Source.Fast
+        val pager = switchablePager { mode }
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        testScheduler.advanceUntilIdle()
+        checkNotNull(latest).data[50]
+        testScheduler.advanceUntilIdle()
+        checkNotNull(latest).loadState shouldBe LoadState.Success
+
+        // A far read starts a slow pass that is still in flight when the consumer comes back
+        mode = Source.Slow
+        checkNotNull(latest).data[500]
+        testScheduler.advanceTimeBy(400)
+        checkNotNull(latest).loadState shouldBe LoadState.Loading
+
+        // The window around 50 is still cached, so the superseding pass has nothing to fetch
+        checkNotNull(latest).data[50]
+        testScheduler.advanceTimeBy(400)
+        testScheduler.runCurrent()
+        checkNotNull(latest).loadState shouldBe LoadState.Success
+        job.cancel()
+    }
+
+    @Test
+    fun empty_plan_does_not_clear_error() = runTest {
+        var mode = Source.Fast
+        val pager = switchablePager { mode }
+        var latest: PagingData<Int>? = null
+        val job: Job = launch { pager.flow.collectLatest { latest = it } }
+        testScheduler.advanceUntilIdle()
+        checkNotNull(latest).data[50]
+        testScheduler.advanceUntilIdle()
+
+        mode = Source.Failing
+        checkNotNull(latest).data[500]
+        testScheduler.advanceUntilIdle()
+        checkNotNull(latest).loadState.shouldBeInstanceOf<LoadState.Error>()
+
+        // Nothing to fetch around 50, and that is no reason to forget the failure at 500
+        checkNotNull(latest).data[50]
+        testScheduler.advanceUntilIdle()
+        checkNotNull(latest).loadState.shouldBeInstanceOf<LoadState.Error>()
+        job.cancel()
+    }
 }

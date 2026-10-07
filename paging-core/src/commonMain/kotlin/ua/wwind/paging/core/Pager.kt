@@ -140,8 +140,9 @@ public class Pager<T>(
         val data: MutableStateFlow<PagingMap<T>> =
             MutableStateFlow(PagingMap(0, persistentMapOf(), onGet = ::onGet))
 
-        // Current loading state (Loading, Success, or Error)
-        val loadState: MutableStateFlow<LoadState> = MutableStateFlow(LoadState.Success)
+        // Current loading state (Loading, Success, or Error). Loading until the first pass settles:
+        // the initial window is always requested at once.
+        val loadState: MutableStateFlow<LoadState> = MutableStateFlow(LoadState.Loading)
 
         // Mutex to ensure thread-safe access to internal state
         val mutex = Mutex()
@@ -155,7 +156,7 @@ public class Pager<T>(
 
         // Combine and emit data
         val emitter = launch {
-            combine(data, loadState.onStart { emit(LoadState.Success) }) { data, loadState ->
+            combine(data, loadState.onStart { emit(LoadState.Loading) }) { data, loadState ->
                 PagingData(data, loadState, ::onRetry)
             }.collect { paging -> send(paging) }
         }
@@ -399,8 +400,13 @@ public class Pager<T>(
         mutex: Mutex,
         onGet: (Int) -> Unit,
     ) {
-        // Only proceed if there's something to load
-        val chunks = plan.chunks.toNonEmptyListOrNull() ?: return
+        val chunks = plan.chunks.toNonEmptyListOrNull()
+        if (chunks == null) {
+            // Nothing to fetch. A superseded pass may have set Loading and been cancelled before its
+            // own Success, so settle that here; an Error is left for the consumer to retry.
+            loadStateFlow.compareAndSet(LoadState.Loading, LoadState.Success)
+            return
+        }
 
         // Apply cache size limit (immutable). We must avoid mutating the same Map instance
         // across emissions, otherwise StateFlow's equality check can suppress updates.
