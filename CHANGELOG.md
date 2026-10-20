@@ -13,6 +13,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Breaking:** `PagingData` gains `prefetchState` between `loadState` and `retry` (#11). `loadState` now reports only
+  the accessed position: `Loading` while the item there is missing and being fetched, `Error` when that fetch fails,
+  `Success` as soon as it lands - so `LoadState.Loading -> showLoader()` no longer shows a spinner for the whole
+  preload window or while scrolling over cached data. The rest of the window is reported in `prefetchState`; its
+  failures no longer turn the list into an error. `Error.key` is always the current accessed position.
 - **Breaking:** `PagingMap` is no longer a `data class`, so item keys cannot be set from outside and stay unique in
   every map a consumer sees (#54). Its public constructor `(size, values, onGet)` creates a map with fallback keys only;
   `copy(size, values, onGet)` keeps a position's key only while that position holds an equal value. `equals`,
