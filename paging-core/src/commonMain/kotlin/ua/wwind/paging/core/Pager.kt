@@ -63,6 +63,14 @@ import kotlin.math.abs
  * @param concurrency Maximum number of chunks fetched in parallel within one loading pass
  * (default: 4). Filling the preload window costs `ceil(chunks / concurrency)` round trips instead of
  * one per chunk; set it to 1 for a source that must not be hit in parallel.
+ * @param itemKey Optional stable key of an item, exposed through `PagingMap.keyAt` (for example as
+ * the `LazyColumn` key). Must return a type a Bundle can store - `Uuid`, `String` or a primitive, not
+ * a boxed value class - and never a `String` starting with `PagingMap.FALLBACK_KEY_PREFIX`. Keys
+ * should be unique in the source. When one key shows up at several positions, the last written one is
+ * shown and the others are hidden: a transient duplicate (an item that moved between pages read at
+ * different times) resolves within the same loading pass, which refetches once every page holding
+ * the key. A duplicate that survives that refetch is real; all its positions are then shown, extra
+ * ones under fallback keys. With `null`, every key is a fallback and nothing is hidden.
  * @param readData function to load data portions from the data source
  */
 @OptIn(FlowPreview::class)
@@ -72,8 +80,19 @@ public class Pager<T>(
     private val cacheSize: Int = 100,
     private val keyDebounceMs: Long = 300,
     private val concurrency: Int = 4,
+    private val itemKey: ((T) -> Any)? = null,
     private val readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>,
 ) {
+    /** Source-compatible constructor for positional calls without `itemKey`. */
+    public constructor(
+        loadSize: Int,
+        preloadSize: Int,
+        cacheSize: Int,
+        keyDebounceMs: Long,
+        concurrency: Int,
+        readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>,
+    ) : this(loadSize, preloadSize, cacheSize, keyDebounceMs, concurrency, null, readData)
+
     init {
         require(loadSize > 0) { "loadSize must be > 0" }
         require(preloadSize >= 0) { "preloadSize must be >= 0" }
@@ -147,6 +166,9 @@ public class Pager<T>(
         // Mutex to ensure thread-safe access to internal state
         val mutex = Mutex()
 
+        // Touched only under `mutex`
+        val keyedCache: KeyedCache<T>? = itemKey?.let { KeyedCache(it) }
+
         // Track the last position that was requested for optimization
         var lastReadKey: Int = -1
 
@@ -192,7 +214,14 @@ public class Pager<T>(
                         currentLoadJob?.cancelAndJoin()
                         currentLoadJob = null
                         currentLoadingRange = null
-                        data.update { it.copy(values = persistentMapOf()) }
+                        if (keyedCache == null) {
+                            data.update { it.copy(values = persistentMapOf()) }
+                        } else {
+                            mutex.withLock {
+                                keyedCache.clear()
+                                data.update { PagingMap(it.size, persistentMapOf(), ::onGet) }
+                            }
+                        }
                         settledRange.value = IntRange.EMPTY
                         lastReadKey = -1
                     }
@@ -227,6 +256,7 @@ public class Pager<T>(
                         primaryDirection = direction,
                         onGet = ::onGet,
                         settledRange = settledRange,
+                        keyedCache = keyedCache,
                     )
                 }
                 currentLoadJob = job
@@ -282,6 +312,7 @@ public class Pager<T>(
         primaryDirection: Direction,
         onGet: (Int) -> Unit,
         settledRange: MutableStateFlow<IntRange>,
+        keyedCache: KeyedCache<T>?,
     ) {
         try {
             settledRange.value = IntRange.EMPTY
@@ -294,6 +325,7 @@ public class Pager<T>(
                 loadStateFlow = loadStateFlow,
                 mutex = mutex,
                 onGet = onGet,
+                keyedCache = keyedCache,
             )
             // A page of lead time before the edge is what keeps the window moving ahead of a scroll
             settledRange.value = dataFlow.value.settledRangeAround(key, margin = loadSize)
@@ -391,6 +423,10 @@ public class Pager<T>(
      * [cachedValues] is the cache snapshot the merges start from; it is pruned to the plan's cache
      * window before the first fetch. [mutex] serialises the merges - concurrent fetches share one
      * accumulator - and is never held across a fetch.
+     *
+     * With [keyedCache], key conflicts left at the end of the pass get one more round: every grid
+     * cell holding a position of a conflicting key is refetched once, then whatever conflict
+     * survives is confirmed.
      */
     private suspend fun runLoads(
         plan: LoadPlan,
@@ -399,6 +435,7 @@ public class Pager<T>(
         loadStateFlow: MutableStateFlow<LoadState>,
         mutex: Mutex,
         onGet: (Int) -> Unit,
+        keyedCache: KeyedCache<T>?,
     ) {
         val chunks = plan.chunks.toNonEmptyListOrNull()
         if (chunks == null) {
@@ -410,29 +447,34 @@ public class Pager<T>(
 
         // Apply cache size limit (immutable). We must avoid mutating the same Map instance
         // across emissions, otherwise StateFlow's equality check can suppress updates.
-        val cache = CacheAccumulator(cachedValues.pruneToRange(plan.cacheRange), plan.cacheRange)
+        val cache = if (keyedCache == null) {
+            CacheAccumulator(cachedValues.pruneToRange(plan.cacheRange), plan.cacheRange)
+        } else {
+            CacheAccumulator(persistentMapOf(), plan.cacheRange, keyedCache)
+        }
 
         loadStateFlow.value = LoadState.Loading // Signal loading started
         val permits = Semaphore(concurrency)
-        coroutineScope {
-            chunks.map { fetchRange ->
-                async {
-                    permits.withPermit {
-                        val fetchSize = fetchRange.last - fetchRange.first + 1
-                        readData(fetchRange.first, fetchSize)
-                            .collect { portion ->
-                                mutex.withLock {
-                                    // A superseded load is cancelled before its successor starts, and an
-                                    // uncontended lock does not suspend, so the check has to be explicit:
-                                    // without it a dying pass could publish its window over the new one.
-                                    currentCoroutineContext().ensureActive()
-                                    // Build a new immutable map snapshot for each emission to ensure StateFlow emits
-                                    dataFlow.value = cache.next(dataFlow.value, portion, onGet)
-                                }
-                            }
-                    }
-                }
-            }.awaitAll()
+        fetchChunks(chunks, permits, mutex, readData) { portion ->
+            // Build a new immutable map snapshot for each emission to ensure StateFlow emits
+            dataFlow.value = cache.next(dataFlow.value, portion, onGet)
+        }
+        if (keyedCache != null) {
+            val conflictCells = mutex.withLock {
+                currentCoroutineContext().ensureActive()
+                val limit = dataFlow.value.size - 1
+                keyedCache.unconfirmedConflicts().values.flatten()
+                    .map { gridCellAt(it, limit) }
+                    .filterNot { it.isEmpty() }
+                    .distinct()
+            }
+            fetchChunks(conflictCells, permits, mutex, readData) { portion ->
+                dataFlow.value = cache.next(dataFlow.value, portion, onGet)
+            }
+            mutex.withLock {
+                currentCoroutineContext().ensureActive()
+                if (keyedCache.confirmAll().isNotEmpty()) dataFlow.value = cache.publish(dataFlow.value.size, onGet)
+            }
         }
         loadStateFlow.value = LoadState.Success // Signal loading completed
     }
@@ -501,6 +543,35 @@ public class Pager<T>(
  */
 private data class LoadPlan(val chunks: List<IntRange>, val cacheRange: IntRange)
 
+/** Fetches [chunks] concurrently within [permits], handing each portion to [merge] under [mutex]. */
+private suspend fun <T> fetchChunks(
+    chunks: List<IntRange>,
+    permits: Semaphore,
+    mutex: Mutex,
+    readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>,
+    merge: (DataPortion<T>) -> Unit,
+) {
+    coroutineScope {
+        chunks.map { fetchRange ->
+            async {
+                permits.withPermit {
+                    val fetchSize = fetchRange.last - fetchRange.first + 1
+                    readData(fetchRange.first, fetchSize)
+                        .collect { portion ->
+                            mutex.withLock {
+                                // A superseded load is cancelled before its successor starts, and an
+                                // uncontended lock does not suspend, so the check has to be explicit:
+                                // without it a dying pass could publish its window over the new one.
+                                currentCoroutineContext().ensureActive()
+                                merge(portion)
+                            }
+                        }
+                }
+            }
+        }.awaitAll()
+    }
+}
+
 /**
  * Written per row per frame from whatever thread reads the map, read from the loading coroutine.
  *
@@ -521,11 +592,22 @@ private class LastAccessedKey {
  *
  * The chunks of a call run concurrently and share one accumulator, so [next] is only ever called
  * under the pager's mutex.
+ *
+ * With [keyed], writes go through the shared key cache instead of [values]. It is pruned on the
+ * first write rather than up front, so a pass that never writes leaves it in step with the
+ * published map.
  */
-private class CacheAccumulator<T>(private var values: PersistentMap<Int, T>, private val cacheRange: IntRange) {
-    private var pruned: Boolean = true
+private class CacheAccumulator<T>(
+    private var values: PersistentMap<Int, T>,
+    private val cacheRange: IntRange,
+    private val keyed: KeyedCache<T>? = null,
+) {
+    private var pruned: Boolean = keyed == null
 
-    fun next(current: PagingMap<T>, portion: DataPortion<T>, onGet: (Int) -> Unit): PagingMap<T> {
+    fun next(current: PagingMap<T>, portion: DataPortion<T>, onGet: (Int) -> Unit): PagingMap<T> =
+        if (keyed != null) nextKeyed(keyed, current, portion, onGet) else nextUnkeyed(current, portion, onGet)
+
+    private fun nextUnkeyed(current: PagingMap<T>, portion: DataPortion<T>, onGet: (Int) -> Unit): PagingMap<T> {
         if (current.size != portion.totalSize) {
             values = portion.values
             pruned = false
@@ -539,6 +621,32 @@ private class CacheAccumulator<T>(private var values: PersistentMap<Int, T>, pri
         )
         pruned = true
         return PagingMap(size = portion.totalSize, values = values, onGet = onGet)
+    }
+
+    /** The key cache as it stands; only for an accumulator built with [keyed]. */
+    fun publish(size: Int, onGet: (Int) -> Unit): PagingMap<T> {
+        val keyed = checkNotNull(keyed)
+        return PagingMap(size = size, values = keyed.visible, onGet = onGet, keys = keyed.keys)
+    }
+
+    private fun nextKeyed(
+        keyed: KeyedCache<T>,
+        current: PagingMap<T>,
+        portion: DataPortion<T>,
+        onGet: (Int) -> Unit,
+    ): PagingMap<T> {
+        // A new total shifts positions, so the old key index is meaningless; the portion is kept
+        // whole, as in the unkeyed path.
+        val sizeChanged = current.size != portion.totalSize
+        if (sizeChanged) keyed.clear()
+        keyed.write(
+            incoming = portion.values,
+            cacheRange = if (sizeChanged) Int.MIN_VALUE..Int.MAX_VALUE else cacheRange,
+            pruneExisting = !sizeChanged && !pruned,
+            confirmOnRewrite = false,
+        )
+        pruned = !sizeChanged
+        return publish(portion.totalSize, onGet)
     }
 }
 
