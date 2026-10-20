@@ -128,9 +128,13 @@ pass. (Today streaming range errors carry `range.first`; this changes.)
   pass reports `LoadState.Error`; that has to change at least for the anchor.
 - A failing anchor chunk sets `loadState = Error`. Whether the prefetch chunks keep going is left to the
   builder.
-- A pass with nothing to fetch keeps today's behaviour: a `Loading` left behind by a cancelled pass is
-  settled to `Success`; an `Error` is left for the consumer to retry. This applies to each state
-  separately.
+- A pass with nothing to fetch keeps today's behaviour for `loadState`: a `Loading` left behind by a
+  cancelled pass is settled to `Success`; an `Error` is left for the consumer to retry.
+- *Decision (final review):* a `prefetchState = Error` whose failed chunk is no longer planned - it is
+  cached by now, or it fell out of the window - settles to `Success` as soon as a pass plans no prefetch
+  work. A failed chunk still in the window and still missing is planned again by the next pass, so the
+  error cannot be lost; without this rule a lingering error re-keyed to the current position made
+  `retry(error.key)` a no-op.
 - Initial values: `loadState = Loading` (unchanged), `prefetchState = Success` until the first pass
   schedules prefetch work.
 
@@ -141,6 +145,9 @@ pass. (Today streaming range errors carry `range.first`; this changes.)
   `Loading` *and* the item at `lastReadKey` is not cached. Scrolling back into cached data whose stream had
   been closed and is now reopened therefore stays `Success`.
 - `prefetchState` is the aggregate over all other ranges in `rangeLoadStates`.
+- *Decision (final review):* an `Error` entry of a range whose stream has ended is dropped once the range
+  lies further than `closeThreshold` outside the window, like an active stream would be closed. Same
+  lifetime as a `Pager` prefetch error: it lives while the failed data is still wanted.
 - A `readTotal()` failure (`markKnownRanges`) affects the whole list, so it shows up in `loadState`. The
   anchor range is among the known ranges, so this falls out of the rule; when nothing is known yet the
   first page stands in, as today.

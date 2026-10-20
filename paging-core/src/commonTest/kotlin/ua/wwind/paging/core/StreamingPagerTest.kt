@@ -656,6 +656,45 @@ class StreamingPagerTest {
     }
 
     @Test
+    fun prefetch_error_of_a_range_left_far_outside_the_window_is_dropped() = runTest {
+        val boom = IllegalStateException("edge boom")
+        val pager: StreamingPager<Int> = StreamingPager(
+            config = StreamingPagerConfig(
+                loadSize = 5,
+                preloadSize = 5,
+                cacheSize = 100,
+                closeThreshold = 5,
+                keyDebounceMs = 0,
+            ),
+            readTotal = { MutableStateFlow(100) },
+            readPortion = { start, size ->
+                flow {
+                    if (start == 25) throw boom
+                    emitAll(MutableStateFlow((start..<start + size).associateWith { it }))
+                }
+            },
+        )
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        testScheduler.advanceUntilIdle()
+        checkNotNull(latest).data[20]
+        testScheduler.advanceUntilIdle()
+        latest.prefetchState shouldBe LoadState.Error(boom, 20)
+
+        latest.data[60] // range 25 is now well beyond closeThreshold
+        testScheduler.advanceUntilIdle()
+        latest.loadState shouldBe LoadState.Success
+        latest.prefetchState shouldBe LoadState.Success
+
+        latest.retry(60)
+        testScheduler.advanceUntilIdle()
+        latest.prefetchState shouldBe LoadState.Success
+
+        job.cancel()
+    }
+
+    @Test
     fun scrolling_back_into_reopened_cached_range_stays_success() = runTest {
         val opened = mutableSetOf<Int>()
         val pager: StreamingPager<Int> = StreamingPager(

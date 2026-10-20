@@ -6,6 +6,7 @@ import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
@@ -168,7 +169,8 @@ class PagerLoadStateTest {
         val (observed, job) = observe(source.pager())
 
         observed.current.data.values.containsKey(0) shouldBe true
-        observed.current.loadState.shouldBeInstanceOf<LoadState.Error>()
+        observed.current.loadState shouldBe LoadState.Error(boom, key = 0)
+        observed.current.prefetchState shouldBe LoadState.Success
         job.cancel()
     }
 
@@ -332,7 +334,7 @@ class PagerLoadStateTest {
     }
 
     @Test
-    fun lingering_prefetch_error_key_follows_a_re_anchor() = runTest {
+    fun prefetch_error_becomes_a_load_error_when_its_chunk_becomes_the_anchor() = runTest {
         val source = Source(delayOf = { if (it == 40) 500 else 0 }, failuresLeft = mutableMapOf(40 to Int.MAX_VALUE))
         val (observed, job) = observe(source.pager())
         access(observed, 70) // fills 0..139 apart from the failing chunk 40
@@ -341,10 +343,96 @@ class PagerLoadStateTest {
 
         access(observed, 45) // the pass for 45 only fetches its own chunk, 40
         observed.current.loadState shouldBe LoadState.Loading
-        observed.current.prefetchState shouldBe LoadState.Error(boom, key = 45)
+        observed.current.prefetchState shouldBe LoadState.Success
 
         access(observed, 50) // same chunk, still in flight
-        (observed.current.prefetchState as LoadState.Error).key shouldBe 50
+        testScheduler.advanceUntilIdle()
+        observed.current.loadState shouldBe LoadState.Error(boom, key = 50)
+        observed.current.prefetchState shouldBe LoadState.Success
         job.cancel()
+    }
+
+    @Test
+    fun prefetch_error_settles_once_its_chunk_is_no_longer_planned() = runTest {
+        val source = Source(failuresLeft = mutableMapOf(120 to Int.MAX_VALUE))
+        val (observed, job) = observe(source.pager())
+        access(observed, 70) // window 0..139, chunk 120 fails
+        testScheduler.advanceUntilIdle()
+        val error = observed.current.prefetchState.shouldBeInstanceOf<LoadState.Error>()
+        error.key shouldBe 70
+
+        observed.current.retry(30) // window 0..99 is cached, 120 is outside it
+        testScheduler.advanceUntilIdle()
+
+        observed.current.loadState shouldBe LoadState.Success
+        observed.current.prefetchState shouldBe LoadState.Success
+        source.requested.count { it == 120 } shouldBe 1
+        job.cancel()
+    }
+
+    @Test
+    fun prefetch_error_of_a_chunk_still_in_the_window_stays_until_the_retry_refetches_it() = runTest {
+        val source = Source(failuresLeft = mutableMapOf(40 to Int.MAX_VALUE))
+        val (observed, job) = observe(source.pager())
+        access(observed, 10)
+        testScheduler.advanceUntilIdle()
+        testScheduler.advanceTimeBy(10_000)
+        observed.current.prefetchState shouldBe LoadState.Error(boom, key = 10)
+
+        observed.current.retry(10)
+        testScheduler.advanceUntilIdle()
+
+        source.requested.count { it == 40 } shouldBe 2
+        observed.current.prefetchState shouldBe LoadState.Error(boom, key = 10)
+        job.cancel()
+    }
+
+    @Test
+    fun re_anchor_onto_cached_position_of_failed_chunk_reports_error() = runTest {
+        // Chunk 20 emits and then fails at 100; 40 and 60 are still in flight after that.
+        val source = Source(delayOf = { if (it == 20) 100 else 500 }, failAfterEmit = setOf(20), concurrency = 1)
+        val (observed, job) = observe(source.pager())
+        access(observed, 10)
+
+        access(observed, 25)
+        observed.current.data.values.containsKey(25) shouldBe true
+        observed.current.loadState shouldBe LoadState.Error(boom, key = 25)
+
+        testScheduler.advanceUntilIdle()
+        observed.current.loadState shouldBe LoadState.Error(boom, key = 25)
+        observed.current.prefetchState shouldBe LoadState.Success
+        job.cancel()
+    }
+
+    @Test
+    fun pass_with_nothing_to_fetch_re_keys_a_lingering_load_error() = runTest {
+        val source = Source(failuresLeft = mutableMapOf(60 to Int.MAX_VALUE))
+        val (observed, job) = observe(source.pager())
+        access(observed, 70)
+        testScheduler.advanceUntilIdle()
+        observed.current.loadState shouldBe LoadState.Error(boom, key = 70)
+        val requestsBefore = source.requested.size
+
+        access(observed, 0) // window 0..59 is cached
+        testScheduler.advanceUntilIdle()
+
+        source.requested.size shouldBe requestsBefore
+        observed.current.loadState shouldBe LoadState.Error(boom, key = 0)
+        observed.current.prefetchState shouldBe LoadState.Success
+        job.cancel()
+    }
+
+    @Test
+    fun ended_pass_refuses_to_re_anchor() {
+        val loadState = MutableStateFlow<LoadState>(LoadState.Loading)
+        val pass = PassStates(10, loadState, MutableStateFlow(LoadState.Success))
+        pass.passStarted(listOf(0..19), emptyMap<Int, Int>(), conflictsLeft = false)
+        pass.reanchor(15, emptyMap<Int, Int>()) shouldBe true
+
+        pass.passEnded()
+
+        // The access then schedules a new pass instead of following this one.
+        pass.reanchor(5, emptyMap<Int, Int>()) shouldBe false
+        loadState.value shouldBe LoadState.Success
     }
 }

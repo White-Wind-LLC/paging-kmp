@@ -100,7 +100,10 @@ internal class StreamingPagerState<T>(
 
     val rangeLoadStates: MutableStateFlow<Map<IntRange, LoadState>?> = MutableStateFlow(null)
 
-    /** The key the window was last planned for; mirrors [lastReadKey], published for the derived states. */
+    /**
+     * The key the window was last planned around, published for the derived states. A shrink that drops it
+     * moves it to the new last index, or to 0 when the list empties.
+     */
     val anchorKey: MutableStateFlow<Int> = MutableStateFlow(0)
 
     /**
@@ -308,11 +311,18 @@ internal class StreamingPagerState<T>(
 
     /**
      * Cancels the streams that sit further than [StreamingPagerConfig.closeThreshold] outside
-     * [window]. Expects [mutex] to be held.
+     * [window], and drops the errors of ended streams that far out. Expects [mutex] to be held.
      */
     private fun closeStreamsOutsideWindowLocked(window: IntRange) {
         val toCloseNow = activeStreams.keys.filter { r ->
             distanceBeyondWindow(window, r) > config.closeThreshold
+        }
+        // An ended stream's error lives only while its range is still wanted; a retry would not reopen it.
+        val staleErrors = rangeLoadStates.value.orEmpty().filter { (r, state) ->
+            state is LoadState.Error && r !in activeStreams && distanceBeyondWindow(window, r) > config.closeThreshold
+        }.keys
+        if (staleErrors.isNotEmpty()) {
+            rangeLoadStates.update { current: Map<IntRange, LoadState>? -> current?.minus(staleErrors) }
         }
         if (toCloseNow.isNotEmpty()) {
             logger.d {

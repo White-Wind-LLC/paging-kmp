@@ -173,7 +173,7 @@ public class Pager<T>(
         // Track the last position that was requested for optimization
         var lastReadKey: Int = -1
 
-        // Active loading job and its planned range; used to prevent duplicate loads and support cancellation
+        // Latest loading job and its planned range; read only while the job is active
         var currentLoadJob: Job? = null
         var currentLoadingRange: IntRange? = null
 
@@ -223,7 +223,8 @@ public class Pager<T>(
                         currentLoadJob = null
                         currentLoadingRange = null
                         currentPass = null
-                        // Loading goes out before the cleared map, which must never be published as Success
+                        // Loading goes out before the cleared map, which must never be published as Success.
+                        // `combine` only sees the two writes in this order on a single-threaded dispatcher.
                         if (keyed == null) {
                             loadState.value = LoadState.Loading
                             data.update { it.copy(values = persistentMapOf()) }
@@ -281,14 +282,9 @@ public class Pager<T>(
                         keyed = keyed,
                     )
                 }
+                // A finished job is left in place rather than cleared from a completion handler: that
+                // would run on the job's thread and could race the next pass being scheduled here.
                 currentLoadJob = job
-                job.invokeOnCompletion {
-                    if (currentLoadJob === job) {
-                        currentLoadJob = null
-                        currentLoadingRange = null
-                        currentPass = null
-                    }
-                }
 
                 lastReadKey = key
             }
@@ -473,7 +469,7 @@ public class Pager<T>(
         val conflictsLeft = keyed != null && mutex.withLock { keyed.untriedConflictsLocked().isNotEmpty() }
         if (chunks.isEmpty() && !conflictsLeft) {
             // Nothing to fetch. A superseded pass may have set Loading and been cancelled before its
-            // own Success, so settle that here; an Error is left for the consumer to retry.
+            // own Success, so settle that here; a loadState Error is left for the consumer to retry.
             mutex.withLock {
                 currentCoroutineContext().ensureActive()
                 states.settle()
@@ -683,7 +679,7 @@ private suspend fun <T> resolveConflicts(
  * pass's first transition rewrites whatever it left. An `Error` always carries the anchor - the key
  * `retry` should be called with - never the start of the chunk that failed.
  */
-private class PassStates(
+internal class PassStates(
     anchor: Int,
     private val loadState: MutableStateFlow<LoadState>,
     private val prefetchState: MutableStateFlow<LoadState>,
@@ -693,6 +689,9 @@ private class PassStates(
 
     // Every chunk of this pass that failed, in failure order
     private val failedChunks: MutableMap<IntRange, Throwable> = LinkedHashMap()
+
+    // Failures from the conflict round, which over a cached anchor count as prefetch
+    private val failedConflictCells = HashSet<IntRange>()
 
     // Chunks and conflict cells requested so far, and those whose flow completed normally
     private val requested = HashSet<IntRange>()
@@ -704,7 +703,10 @@ private class PassStates(
     private var started = false
     private var ended = false
 
-    /** Only a chunk holding the anchor can make it Loading: nothing else would bring it in. */
+    /**
+     * Only a chunk holding the anchor can make it Loading: nothing else would bring it in. A prefetch
+     * Error is replaced either way: its chunk is planned again or no longer wanted.
+     */
     fun passStarted(chunks: List<IntRange>, values: Map<Int, *>, conflictsLeft: Boolean) {
         started = true
         requested += chunks
@@ -714,15 +716,18 @@ private class PassStates(
             else -> loadState.value.settled()
         }
         val prefetchPlanned = chunks.any { anchor !in it } || conflictsLeft
-        prefetchState.value = if (prefetchPlanned) LoadState.Loading else prefetchState.value.settled()
+        prefetchState.value = if (prefetchPlanned) LoadState.Loading else LoadState.Success
     }
 
-    /** A pass with nothing to fetch: what a cancelled pass left Loading is done, an Error stays. */
+    /**
+     * A pass with nothing to fetch: what a cancelled pass left Loading is done, a loadState Error stays.
+     * A prefetch Error settles: its chunk is cached by now or out of the window.
+     */
     fun settle() {
         started = true
         ended = true
         loadState.value = loadState.value.settled()
-        prefetchState.value = prefetchState.value.settled()
+        prefetchState.value = LoadState.Success
     }
 
     /**
@@ -734,24 +739,19 @@ private class PassStates(
         anchor = key
         // Before passStarted there is nothing to judge: it looks at the new anchor itself.
         if (started) {
+            // A failed anchor chunk is an Error even over cached data, a failed conflict cell only over a missing one
             val cached = values.containsKey(key)
-            val failed = failedChunks.keys.firstOrNull { key in it }?.takeUnless { cached }
+            val failed = failedChunks.keys.firstOrNull { key in it && !(cached && it in failedConflictCells) }
             loadFailure = failed
             loadState.value = when {
-                cached -> LoadState.Success
                 failed != null -> LoadState.Error(failedChunks.getValue(failed), key)
+                cached -> LoadState.Success
                 requested.any { key in it && it !in done } -> LoadState.Loading
                 else -> LoadState.Success
             }
-            val prefetchPending = requested.any { key !in it && it !in done && it !in failedChunks }
-            val prefetch = prefetchState.value
-            prefetchState.value = when {
-                prefetchPending -> LoadState.Loading
-
-                // A lingering Error must carry the anchor the user is on now
-                prefetch is LoadState.Error -> prefetch.copy(key = key)
-
-                else -> prefetch
+            // A running pass reports prefetch failures only once it ends, so there is no Error to re-key.
+            if (requested.any { key !in it && it !in done && it !in failedChunks }) {
+                prefetchState.value = LoadState.Loading
             }
         }
         return true
@@ -785,6 +785,7 @@ private class PassStates(
     }
 
     fun conflictCellFailed(cell: IntRange, t: Throwable, values: Map<Int, *>) {
+        if (cell !in failedChunks) failedConflictCells += cell
         failedChunks.getOrPut(cell) { t }
         if (anchor in cell && !values.containsKey(anchor)) {
             loadFailure = cell
