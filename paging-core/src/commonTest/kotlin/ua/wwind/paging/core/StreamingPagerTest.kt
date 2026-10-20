@@ -757,11 +757,8 @@ class StreamingPagerTest {
             ),
             readTotal = {
                 flow {
-                    // Fails after the speculative first page has been opened, so the error lands on it.
-                    if (++totalCalls == 1) {
-                        delay(100)
-                        throw boom
-                    }
+                    // Fails at once, while the speculative first page is still opening (#59).
+                    if (++totalCalls == 1) throw boom
                     emitAll(MutableStateFlow(10))
                 }
             },

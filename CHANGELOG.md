@@ -44,6 +44,11 @@ All notable changes to this project will be documented in this file.
     grace period: the reopened window must emit first.
   - A portion that both adds a position for a key and rewrites a hidden position of that key no longer gives a result
     that depends on the order of the map.
+- `StreamingPager` keeps the `readTotal()` outcome apart from the per-range states (#59). A retry no longer marks
+  every known range `Loading` again, so streams that had already emitted and stay quiet no longer leave
+  `prefetchState` stuck at `Loading`, and a finite `readTotal()` that completed no longer turns any retry into one.
+  A `readTotal()` failure that arrives before the first page settles is no longer overwritten by that page, and it is
+  reported in `loadState` only. A list whose total is known to be 0 reports `Success` instead of `Loading`.
 
 ## [2.3.4] - 2026-10-07
 

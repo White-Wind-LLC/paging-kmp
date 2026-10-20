@@ -77,6 +77,7 @@ public data class StreamingPagerConfig(
  *   end only clipped is reopened for the part of its range that survives.
  * - `loadState` follows the range holding the last planned key, and is `Loading` only while the item
  *   there is not cached; `prefetchState` aggregates the other ranges with priority Loading > Error > Success.
+ *   A `readTotal()` failure shows up in `loadState` only, until a retry resubscribes it.
  *
  * @property config Paging behavior configuration (see `StreamingPagerConfig`).
  * @property readTotal Provider of a continuous flow with the current total item count.
@@ -173,16 +174,18 @@ public class StreamingPager<T>(
                             if (emptyBefore && newTotal > 0) {
                                 state.tryAdjustStreamsForKey(0, this)
                             }
+                            // After the total is applied, so a known empty list is not reported before its size.
+                            state.totalState.value = LoadState.Success
                         }
+                    // A finite total that completed is still current: resubscribe without going `Loading`.
                     retryRequests.first()
-                    state.markKnownRanges { LoadState.Loading }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (t: Throwable) {
                     logger.e(t) { "readTotal: error" }
-                    state.markKnownRanges { range -> LoadState.Error(t, range.first) }
+                    state.totalState.value = LoadState.Error(t, 0)
                     retryRequests.first()
-                    state.markKnownRanges { LoadState.Loading }
+                    state.totalState.value = LoadState.Loading
                 }
             }
         }

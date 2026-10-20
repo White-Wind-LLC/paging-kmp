@@ -22,20 +22,72 @@ import kotlin.test.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class StreamingPagerStateTest {
 
-    private fun state() = StreamingPagerState<Int>(
+    /** With [totalKnown], `readTotal()` has already reported a non-empty list. */
+    private fun state(totalKnown: Boolean = true) = StreamingPagerState<Int>(
         config = StreamingPagerConfig(loadSize = 5, preloadSize = 5, cacheSize = 100, keyDebounceMs = 0),
         readPortion = { _, _ -> emptyFlow() },
         logger = Logger,
-    )
+    ).apply {
+        if (totalKnown) {
+            data.value = PagingMap(20, persistentMapOf()) {}
+            totalState.value = LoadState.Success
+        }
+    }
 
     private val boom = IllegalStateException("boom")
 
     @Test
     fun initial_states_are_loading_and_success() = runTest {
-        val state = state()
+        val state = state(totalKnown = false)
 
         state.loadStateFlow.first() shouldBe LoadState.Loading
         state.prefetchStateFlow.first() shouldBe LoadState.Success
+    }
+
+    @Test
+    fun total_error_is_reported_in_load_state_only_and_wins_over_the_ranges() = runTest {
+        val state = state()
+        state.anchorKey.value = 2
+        state.data.value = PagingMap(20, persistentMapOf(2 to 2)) {}
+        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Success, 5..9 to LoadState.Success)
+        state.totalState.value = LoadState.Error(boom, 0)
+
+        state.loadStateFlow.first() shouldBe LoadState.Error(boom, 2)
+        state.prefetchStateFlow.first() shouldBe LoadState.Success
+    }
+
+    @Test
+    fun total_loading_is_loading_over_a_missing_item_and_success_over_a_cached_one() = runTest {
+        val state = state()
+        state.anchorKey.value = 2
+        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Success)
+        state.totalState.value = LoadState.Loading
+
+        state.loadStateFlow.first() shouldBe LoadState.Loading
+
+        state.data.value = PagingMap(20, persistentMapOf(2 to 2)) {}
+
+        state.loadStateFlow.first() shouldBe LoadState.Success
+    }
+
+    @Test
+    fun range_error_shows_while_the_total_is_still_loading() = runTest {
+        val state = state(totalKnown = false)
+        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Error(boom, 0))
+
+        state.loadStateFlow.first() shouldBe LoadState.Error(boom, 0)
+    }
+
+    @Test
+    fun known_empty_total_is_success_whatever_the_ranges_say() = runTest {
+        val state = state(totalKnown = false)
+        state.totalState.value = LoadState.Success
+
+        state.loadStateFlow.first() shouldBe LoadState.Success
+
+        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Loading)
+
+        state.loadStateFlow.first() shouldBe LoadState.Success
     }
 
     @Test
