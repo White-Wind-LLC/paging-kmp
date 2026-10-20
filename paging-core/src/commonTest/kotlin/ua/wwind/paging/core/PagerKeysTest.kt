@@ -145,8 +145,8 @@ class PagerKeysTest {
         c.job.cancel()
     }
 
-    @Test
-    fun conflictArisingInRefetchRound_staysHidden() = runTest {
+    /** Real duplicate "u" at 19 and 20; r10 and r25 swap during the conflict refetch round. */
+    private fun swapDuringRefetchSource(): ListSource {
         val source = ListSource(ids(40).mapIndexed { i, row -> if (i == 19 || i == 20) "u" to i else row })
         // Refetch round: 20..39 reads before r10 and r25 swap and lands last; 0..19 reads after.
         source.delays = { start, read ->
@@ -167,6 +167,12 @@ class PagerKeysTest {
                 }
             }
         }
+        return source
+    }
+
+    @Test
+    fun conflictArisingInRefetchRound_staysHidden() = runTest {
+        val source = swapDuringRefetchSource()
         val c = collect(pager(source))
         loadBothPages(c)
 
@@ -180,6 +186,28 @@ class PagerKeysTest {
         c.snapshots.forEach(::assertKeysUnique)
         // No second round.
         source.totalReads shouldBe 4
+        c.job.cancel()
+    }
+
+    @Test
+    fun readingHiddenPosition_reloadsItsPage() = runTest {
+        val source = swapDuringRefetchSource()
+        val c = collect(pager(source))
+        loadBothPages(c)
+        val hole = listOf(10, 25).single { it !in c.latest.data.values }
+        val holePage = hole - hole % 20
+        val readsBefore = source.reads.getValue(holePage)
+
+        // A still viewport: the hole is read, then the row last requested.
+        c.latest.data[hole]
+        c.latest.data[1]
+        advanceUntilIdle()
+
+        (source.reads.getValue(holePage) > readsBefore) shouldBe true
+        val data = c.latest.data
+        data.values[hole].shouldNotBeNull().first shouldBe source.list[hole].first
+        data.keyAt(hole) shouldBe source.list[hole].first
+        c.snapshots.forEach(::assertKeysUnique)
         c.job.cancel()
     }
 

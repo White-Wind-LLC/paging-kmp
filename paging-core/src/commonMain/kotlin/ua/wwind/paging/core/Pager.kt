@@ -169,6 +169,10 @@ public class Pager<T>(
         // Touched only under `mutex`
         val keyedCache: KeyedCache<T>? = itemKey?.let { KeyedCache(it) }
 
+        // Set when a keyed pass ends with hidden positions: reading one must reload its page even
+        // when the consumer settles back on the position it last requested.
+        val holesLeft = MutableStateFlow(false)
+
         // Track the last position that was requested for optimization
         var lastReadKey: Int = -1
 
@@ -187,14 +191,18 @@ public class Pager<T>(
         // scroll to settle, so waiting only delays the first paint. `onEach` runs in the debounce
         // operator's own coroutine, so the flag is always set before the next timeout is computed.
         var debounceKeys = false
-        val accessRequests: Flow<LoadRequest> = keyTrigger
+        val accessKeys: Flow<Int> = keyTrigger
             .debounce { if (debounceKeys) keyDebounceMs else 0L }
             .onEach { debounceKeys = true }
             // The trigger only says that something uncached was read; load around where the
             // consumer is - see `lastAccessed`.
             .map { lastAccessed.value }
-            .distinctUntilChanged()
-            .map { key -> LoadRequest(key, Reason.Access) }
+        val accessRequests: Flow<LoadRequest> =
+            if (keyedCache == null) {
+                accessKeys.distinctUntilChanged()
+            } else {
+                accessKeys.distinctUntilChanged { old, new -> old == new && !holesLeft.value }
+            }.map { key -> LoadRequest(key, Reason.Access) }
 
         // One collector drives every load, so the scheduling state above is touched from a single
         // coroutine and a refresh can never interleave with the key pipeline.
@@ -257,6 +265,7 @@ public class Pager<T>(
                         onGet = ::onGet,
                         settledRange = settledRange,
                         keyedCache = keyedCache,
+                        holesLeft = holesLeft,
                     )
                 }
                 currentLoadJob = job
@@ -313,6 +322,7 @@ public class Pager<T>(
         onGet: (Int) -> Unit,
         settledRange: MutableStateFlow<IntRange>,
         keyedCache: KeyedCache<T>?,
+        holesLeft: MutableStateFlow<Boolean>,
     ) {
         try {
             settledRange.value = IntRange.EMPTY
@@ -326,6 +336,7 @@ public class Pager<T>(
                 mutex = mutex,
                 onGet = onGet,
                 keyedCache = keyedCache,
+                holesLeft = holesLeft,
             )
             // A page of lead time before the edge is what keeps the window moving ahead of a scroll
             settledRange.value = dataFlow.value.settledRangeAround(key, margin = loadSize)
@@ -436,6 +447,7 @@ public class Pager<T>(
         mutex: Mutex,
         onGet: (Int) -> Unit,
         keyedCache: KeyedCache<T>?,
+        holesLeft: MutableStateFlow<Boolean>,
     ) {
         val chunks = plan.chunks.toNonEmptyListOrNull()
         if (chunks == null) {
@@ -482,6 +494,7 @@ public class Pager<T>(
                         keyedCache.confirm(positions.first { it in keyedCache.hiddenPositions }) != null
                 }
                 if (confirmed > 0) dataFlow.value = cache.publish(dataFlow.value.size, onGet)
+                holesLeft.value = keyedCache.hiddenPositions.isNotEmpty()
             }
         }
         loadStateFlow.value = LoadState.Success // Signal loading completed
