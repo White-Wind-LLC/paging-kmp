@@ -278,17 +278,21 @@ LazyColumn {
 
 > **The standout feature.** Most paging libraries assume a request/response data source where each page is fetched once.
 > `StreamingPager` is built for **live data**: it keeps a long-lived stream open for every on-screen page (a *portion*).
-> When anything inside a page changes on the server, the server re-emits that **whole portion** over SSE (or WebSocket),
-> and the pager swaps that page into the list in place — other pages stay untouched, and you never poll or refresh
-> manually. The unit of a live update is a **portion (page of `loadSize` items)**, not an individual row.
+> When anything inside a page changes on the server, the server pushes the changed rows of that portion over SSE (or
+> WebSocket), and the pager merges them into the list in place — other rows stay untouched, and you never poll or
+> refresh manually. A portion (page of `loadSize` items) is the unit of a subscription; an update can be as small as
+> a single row.
 
 `StreamingPager` splits a live source into two independent streams:
 
 - **`readTotal(): Flow<Int>`** — a continuous stream of the global item count. Drives list size and pruning, and lets the
   list grow/shrink in real time.
 - **`readPortion(start, size): Flow<Map<Int, T>>`** — a long-lived stream for a single page-sized window (no totals).
-  **Each emission carries the current contents of that whole portion** (keyed by absolute position); the pager merges it
-  into the cache, so a change anywhere in the range re-pushes and re-renders that entire page.
+  Emissions are keyed by absolute position and **merged** into the cache: positions an emission carries are
+  overwritten, positions it leaves out keep their cached values. So after a first emission with the whole portion, the
+  source may emit only the rows that changed — no need to resend the page.
+    - Emit the whole portion first on every subscription: a window that closed and reopened may have been pruned.
+    - An emission cannot remove a row. To delete one, shrink `readTotal` and re-emit the rows that shifted.
 
 It then:
 

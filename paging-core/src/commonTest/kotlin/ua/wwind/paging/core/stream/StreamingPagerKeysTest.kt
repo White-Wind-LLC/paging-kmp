@@ -110,6 +110,23 @@ class StreamingPagerKeysTest {
     }
 
     @Test
+    fun partialPortion_updatesOnlyItsRows() = runTest {
+        val src = TestSource<Row>()
+        src.totalFlow.value = 5
+        val c = collect(pager(src))
+        advanceUntilIdle()
+        src.emitPortion(0, 5, rows(0, "abcde"))
+        runCurrent()
+
+        src.emitPortion(0, 5, rows(2, "x"))
+        runCurrent()
+
+        c.assertShows("abxde")
+        c.assertAllUnique()
+        c.job.cancel()
+    }
+
+    @Test
     fun deleteAbove_lowerWindowStale_neverDuplicates() = runTest {
         val src = TestSource<Row>()
         src.totalFlow.value = 20

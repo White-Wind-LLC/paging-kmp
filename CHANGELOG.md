@@ -17,6 +17,9 @@ All notable changes to this project will be documented in this file.
   every map a consumer sees (#54). Its public constructor `(size, values, onGet)` creates a map with fallback keys only;
   `copy(size, values, onGet)` keeps a position's key only while that position holds an equal value. `equals`,
   `hashCode` and `toString` stay; the `componentN` functions (destructuring) are gone.
+- The `StreamingPager` `readPortion` contract is documented as a merge (#14): an emission may carry only the rows that
+  changed, and the positions it leaves out keep their cached values. This is how the pager already behaved; the README
+  no longer asks sources to resend the whole portion on every change.
 - `paging-samples` key their lists by user id through `itemKey` and `keyAt` instead of by index, so rows keep their
   state and animate when items are inserted or removed above them (#15). The streaming sample gains an "Insert at top"
   button that adds a user with a new id.

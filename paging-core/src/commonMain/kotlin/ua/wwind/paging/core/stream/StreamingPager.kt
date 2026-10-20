@@ -69,6 +69,7 @@ public data class StreamingPagerConfig(
  * Behavior:
  * - `readTotal()` is a continuous flow of the total item count; it drives `PagingMap.size` and pruning.
  * - `readPortion(start, size)` emits maps of index-to-item for the requested range; no totals are emitted.
+ *   Each emission is merged into the cache, so it may carry only the rows that changed.
  * - The pager opens and keeps portion flows for chunks of size `config.loadSize` inside an active window
  *   centered around the last accessed key, preloading up to `config.preloadSize` in both directions.
  * - Flows are closed when they move farther than `config.closeThreshold` beyond the active window.
@@ -90,7 +91,11 @@ public data class StreamingPagerConfig(
  * `shareIn(replay = 1)`) hands a reopened window its stale portion, which can confirm a transient
  * duplicate until fresh data arrives. With `null`, every key is a fallback and nothing is hidden.
  * @property readPortion Provider of a flow for a portion starting at `pos` of length `loadSize`,
- * returning only the map of values keyed by absolute index.
+ * returning only the map of values keyed by absolute index. Every emission is merged into the cache:
+ * the positions it carries are overwritten and the ones it leaves out keep their cached values, so a
+ * later emission may carry only the rows that changed. The first emission of each subscription should
+ * carry the whole portion, since a reopened window may have been pruned from the cache. An emission
+ * cannot remove a row: shrink `readTotal` or re-emit the shifted rows instead.
  */
 @ExperimentalStreamingPagerApi
 @OptIn(FlowPreview::class)
