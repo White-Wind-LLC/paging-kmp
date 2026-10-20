@@ -78,7 +78,8 @@ public data class PagingMap<V>(
      *
      * Never calls `onGet`, so it does not trigger loading. Unique within this map only
      * (two pagers in one list are not supported). Unloaded or hidden positions, and every
-     * position when no `itemKey` is set, get the fallback `FALLBACK_KEY_PREFIX + index`.
+     * position when no `itemKey` is set, get the fallback `FALLBACK_KEY_PREFIX + index`; so do
+     * the extra rows of a key confirmed to appear several times in the source.
      */
     public fun keyAt(index: Int): Any = keys[index] ?: (FALLBACK_KEY_PREFIX + index)
 

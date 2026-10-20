@@ -7,9 +7,15 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - `itemKey` on `Pager`, `StreamingPager` and `PagingMediatorConfig`, and `PagingMap.keyAt(index)`, for keying a
-  `LazyColumn` by item id (#52). A key that briefly appears twice while pages shift is hidden: the later row is shown as
-  not yet loaded until the data settles, instead of crashing the list with a duplicate key. A key that really appears
-  twice in the source is shown as two rows with unique keys. Without `itemKey` nothing changes.
+  `LazyColumn` by item id (#52). A key that briefly appears twice while pages shift is hidden: the copy from older data
+  is shown as not yet loaded until the data settles, instead of crashing the list with a duplicate key. A key that
+  really appears twice in the source is shown as two rows with unique keys. Without `itemKey` nothing changes.
+
+### Changed
+
+- Binary compatibility: libraries compiled against 2.3.x that call the `Pager`, `StreamingPager` or
+  `PagingMediatorConfig` constructors, or `PagingMap.copy` / `PagingMediatorConfig.copy`, must be recompiled against
+  2.4.0. Source compatibility is kept.
 
 ## [2.3.4] - 2026-10-07
 
