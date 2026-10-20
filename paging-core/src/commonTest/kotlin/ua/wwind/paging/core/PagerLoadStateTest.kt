@@ -330,4 +330,21 @@ class PagerLoadStateTest {
         (observed.current.prefetchState as LoadState.Error).key shouldBe 20
         job.cancel()
     }
+
+    @Test
+    fun lingering_prefetch_error_key_follows_a_re_anchor() = runTest {
+        val source = Source(delayOf = { if (it == 40) 500 else 0 }, failuresLeft = mutableMapOf(40 to Int.MAX_VALUE))
+        val (observed, job) = observe(source.pager())
+        access(observed, 70) // fills 0..139 apart from the failing chunk 40
+        testScheduler.advanceUntilIdle()
+        observed.current.prefetchState shouldBe LoadState.Error(boom, key = 70)
+
+        access(observed, 45) // the pass for 45 only fetches its own chunk, 40
+        observed.current.loadState shouldBe LoadState.Loading
+        observed.current.prefetchState shouldBe LoadState.Error(boom, key = 45)
+
+        access(observed, 50) // same chunk, still in flight
+        (observed.current.prefetchState as LoadState.Error).key shouldBe 50
+        job.cancel()
+    }
 }

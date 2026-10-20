@@ -744,7 +744,15 @@ private class PassStates(
                 else -> LoadState.Success
             }
             val prefetchPending = requested.any { key !in it && it !in done && it !in failedChunks }
-            if (prefetchPending) prefetchState.value = LoadState.Loading
+            val prefetch = prefetchState.value
+            prefetchState.value = when {
+                prefetchPending -> LoadState.Loading
+
+                // A lingering Error must carry the anchor the user is on now
+                prefetch is LoadState.Error -> prefetch.copy(key = key)
+
+                else -> prefetch
+            }
         }
         return true
     }
