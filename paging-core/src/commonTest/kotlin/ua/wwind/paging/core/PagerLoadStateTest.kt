@@ -23,10 +23,18 @@ class PagerLoadStateTest {
         val delayOf: (start: Int) -> Long = { 0 },
         val failuresLeft: MutableMap<Int, Int> = mutableMapOf(),
         val failAfterEmit: Set<Int> = emptySet(),
+        val shortChunks: Map<Int, Int> = emptyMap(),
+        val concurrency: Int = 4,
     ) {
         val requested = mutableListOf<Int>()
 
-        fun pager(): Pager<Int> = Pager(loadSize = 20, preloadSize = 60, cacheSize = 100) { pos, size ->
+        fun pager(): Pager<Int> = Pager(
+            loadSize = 20,
+            preloadSize = 60,
+            cacheSize = 100,
+            keyDebounceMs = 300,
+            concurrency = concurrency,
+        ) { pos, size ->
             flow {
                 requested += pos
                 delay(delayOf(pos))
@@ -35,7 +43,8 @@ class PagerLoadStateTest {
                     failuresLeft[pos] = left - 1
                     throw boom
                 }
-                emit(DataPortion(1_000, (pos..<pos + size).associateWith { it }.toPersistentMap()))
+                val rows = shortChunks[pos] ?: size
+                emit(DataPortion(1_000, (pos..<pos + rows).associateWith { it }.toPersistentMap()))
                 if (pos in failAfterEmit) throw boom
             }
         }
@@ -44,6 +53,7 @@ class PagerLoadStateTest {
     /** Records state transitions; [clearTransitions] keeps the current states as the baseline. */
     private class Observed {
         var latest: PagingData<Int>? = null
+        val emissions = mutableListOf<PagingData<Int>>()
         val loadStates = mutableListOf<String>()
         val prefetchStates = mutableListOf<String>()
         private var lastLoad: String? = null
@@ -53,6 +63,7 @@ class PagerLoadStateTest {
 
         fun record(paging: PagingData<Int>) {
             latest = paging
+            emissions += paging
             val load = paging.loadState::class.simpleName!!
             if (lastLoad != load) loadStates += load
             lastLoad = load
@@ -221,6 +232,102 @@ class PagerLoadStateTest {
         testScheduler.advanceUntilIdle()
 
         observed.loadStates shouldBe listOf("Loading", "Success")
+        observed.emissions.none { it.data.values.isEmpty() && it.loadState == LoadState.Success } shouldBe true
+        job.cancel()
+    }
+
+    @Test
+    fun access_inside_running_pass_re_anchors_load_state() = runTest {
+        // One chunk at a time: 20, 40 and 60 land at 500, 1 000 and 1 500 after the pass starts.
+        val source = Source(delayOf = { if (it == 0) 0 else 500 }, concurrency = 1)
+        val (observed, job) = observe(source.pager())
+        access(observed, 10)
+        observed.current.loadState shouldBe LoadState.Success
+
+        access(observed, 60)
+        observed.current.loadState shouldBe LoadState.Loading
+
+        testScheduler.advanceTimeBy(900) // chunk 40 has landed, 60 is in flight
+        testScheduler.runCurrent()
+        observed.current.data.values.containsKey(40) shouldBe true
+        observed.current.loadState shouldBe LoadState.Loading
+
+        testScheduler.advanceUntilIdle()
+        observed.current.data.values.containsKey(60) shouldBe true
+        observed.current.loadState shouldBe LoadState.Success
+        source.requested shouldBe listOf(0, 20, 40, 60) // the pass for 10 only, nothing refetched
+        job.cancel()
+    }
+
+    @Test
+    fun access_inside_running_pass_onto_failed_chunk_reports_error() = runTest {
+        val source = Source(
+            delayOf = { if (it == 20) 100 else 500 },
+            failuresLeft = mutableMapOf(20 to Int.MAX_VALUE),
+            concurrency = 1,
+        )
+        val (observed, job) = observe(source.pager())
+        access(observed, 10) // chunk 20 fails at 100, before the access to 25 is debounced
+
+        access(observed, 25)
+        observed.current.loadState shouldBe LoadState.Error(boom, key = 25)
+
+        testScheduler.advanceUntilIdle()
+        observed.current.loadState shouldBe LoadState.Error(boom, key = 25)
+        observed.current.prefetchState shouldBe LoadState.Success
+        job.cancel()
+    }
+
+    @Test
+    fun anchor_chunk_failure_moves_to_prefetch_when_the_user_moves_on() = runTest {
+        val source = Source(
+            delayOf = { if (it == 500) 10 else 500 },
+            failuresLeft = mutableMapOf(500 to Int.MAX_VALUE),
+        )
+        val (observed, job) = observe(source.pager())
+        access(observed, 505)
+        testScheduler.advanceTimeBy(20)
+        testScheduler.runCurrent()
+        observed.current.loadState shouldBe LoadState.Error(boom, key = 505)
+
+        access(observed, 545) // chunk 540 is still in flight
+        observed.current.loadState shouldBe LoadState.Loading
+
+        testScheduler.advanceUntilIdle()
+        observed.current.loadState shouldBe LoadState.Success
+        observed.current.prefetchState shouldBe LoadState.Error(boom, key = 545)
+        job.cancel()
+    }
+
+    @Test
+    fun short_anchor_chunk_ends_loading_when_it_completes() = runTest {
+        // Chunk 500 returns rows 500..504 only, so 510 never reaches the cache.
+        val source = Source(delayOf = { if (it == 500) 100 else 300 }, shortChunks = mapOf(500 to 5))
+        val (observed, job) = observe(source.pager())
+
+        access(observed, 510)
+        observed.current.loadState shouldBe LoadState.Loading
+
+        testScheduler.advanceTimeBy(150)
+        testScheduler.runCurrent()
+        observed.current.data.values.containsKey(510) shouldBe false
+        observed.current.loadState shouldBe LoadState.Success
+        observed.current.prefetchState shouldBe LoadState.Loading
+        job.cancel()
+    }
+
+    @Test
+    fun lingering_prefetch_error_key_follows_the_user() = runTest {
+        val source = Source(failuresLeft = mutableMapOf(40 to Int.MAX_VALUE))
+        val (observed, job) = observe(source.pager())
+        access(observed, 10)
+        testScheduler.advanceUntilIdle()
+        observed.current.prefetchState shouldBe LoadState.Error(boom, key = 10)
+
+        access(observed, 20) // cached
+        testScheduler.advanceUntilIdle()
+
+        (observed.current.prefetchState as LoadState.Error).key shouldBe 20
         job.cancel()
     }
 }
