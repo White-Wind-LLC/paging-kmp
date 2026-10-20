@@ -13,19 +13,8 @@ import ua.wwind.paging.sample.domain.model.UserRole
  * In-memory editable store with a backing MutableList and a StateFlow that emits on any change.
  */
 class SharedEditableUsersStore(initialSize: Int = 200) {
-    private val users: MutableList<User> = MutableList(initialSize) { index ->
-        val id = index + 1
-        User(
-            id = index,
-            firstName = "User$" + id,
-            lastName = "Sample",
-            email = "user$id@example.com",
-            role = UserRole.entries[id % UserRole.entries.size],
-            avatarUrl = "https://api.dicebear.com/7.x/avataaars/svg?seed=$id",
-            isActive = id % 2 == 0,
-            joinedDate = "2023-01-${(id % 28 + 1).toString().padStart(2, '0')}",
-        )
-    }
+    private val users: MutableList<User> = MutableList(initialSize, ::sampleUser)
+    private var nextId: Int = initialSize
 
     private val usersFlow: MutableStateFlow<List<User>> = MutableStateFlow(users.toList())
 
@@ -56,6 +45,9 @@ class SharedEditableUsersStore(initialSize: Int = 200) {
         usersFlow.value = users.toList()
     }
 
+    /** Inserts a user with a fresh id, unlike [addAt] with a copy of an existing one. */
+    fun insertNewAt(position: Int) = addAt(position, sampleUser(nextId++))
+
     fun removeAt(position: Int) {
         if (position in users.indices) {
             users.removeAt(position)
@@ -66,4 +58,18 @@ class SharedEditableUsersStore(initialSize: Int = 200) {
     fun totalSize(): Int = users.size
 
     fun userAt(position: Int): User? = users.getOrNull(position)
+}
+
+private fun sampleUser(index: Int): User {
+    val id = index + 1
+    return User(
+        id = index,
+        firstName = "User$" + id,
+        lastName = "Sample",
+        email = "user$id@example.com",
+        role = UserRole.entries[id % UserRole.entries.size],
+        avatarUrl = "https://api.dicebear.com/7.x/avataaars/svg?seed=$id",
+        isActive = id % 2 == 0,
+        joinedDate = "2023-01-${(id % 28 + 1).toString().padStart(2, '0')}",
+    )
 }

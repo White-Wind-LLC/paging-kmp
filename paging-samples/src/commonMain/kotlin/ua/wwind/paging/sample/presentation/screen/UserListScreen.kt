@@ -133,7 +133,7 @@ private fun UserList(pagingData: PagingData<User>, listState: LazyListState, mod
         ) {
             items(
                 count = pagingData.data.size,
-                key = { it },
+                key = { pagingData.data.keyAt(it) },
             ) { index ->
                 when (val userEntry = pagingData.data[index]) {
                     EntryState.Loading -> {

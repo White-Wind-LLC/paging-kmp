@@ -54,6 +54,7 @@ fun StreamingUserListScreen(viewModel: StreamingUserListViewModel, modifier: Mod
                     val pos = addPosState.value
                     viewModel.addUserAt(position = pos, user = viewModel.userAt(pos) ?: return@Button)
                 }) { Text("Duplicate at pos") }
+                Button(onClick = { viewModel.insertNewUserAt(position = 0) }) { Text("Insert at top") }
             }
 
             val previewCount = viewModel.totalSize()
@@ -100,10 +101,13 @@ fun StreamingUserListScreen(viewModel: StreamingUserListViewModel, modifier: Mod
                             ),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            items(count = data.data.size, key = { it }) { index ->
+                            items(count = data.data.size, key = { data.data.keyAt(it) }) { index ->
                                 when (val entry = data.data[index]) {
                                     EntryState.Loading -> LoadingItem(index)
-                                    is EntryState.Success -> UserCard(user = entry.value)
+                                    is EntryState.Success -> UserCard(
+                                        user = entry.value,
+                                        modifier = Modifier.animateItem(),
+                                    )
                                 }
                             }
                             if (data.loadState == LoadState.Loading) {

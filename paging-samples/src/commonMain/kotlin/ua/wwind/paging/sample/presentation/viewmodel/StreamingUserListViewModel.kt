@@ -22,6 +22,7 @@ class StreamingUserListViewModel(
             cacheSize = cacheSize,
         ),
         readTotal = { store.totalFlow() },
+        itemKey = { it.id },
         readPortion = { start, size -> store.portionMapFlow(start, size) },
     )
 
@@ -30,6 +31,7 @@ class StreamingUserListViewModel(
     // Editing API
     fun updateUser(position: Int, transform: (User) -> User) = store.updateAt(position, transform)
     fun addUserAt(position: Int, user: User) = store.addAt(position, user)
+    fun insertNewUserAt(position: Int) = store.insertNewAt(position)
     fun removeUserAt(position: Int) = store.removeAt(position)
     fun totalSize(): Int = store.totalSize()
     fun userAt(position: Int): User? = store.userAt(position)
