@@ -55,11 +55,13 @@ internal class KeyedCache<T>(private val itemKey: (T) -> Any) {
         val stale = if (pruneExisting) values.keys.filter { it !in cacheRange } else emptyList()
         if (stale.isEmpty() && incoming.isEmpty()) return EMPTY_RESULT
 
+        // Keys first: a throwing itemKey must leave the cache untouched.
+        val keyed = incoming.mapNotNull { (position, value) ->
+            if (position in cacheRange) Triple(position, value, itemKey(value)) else null
+        }
         val tx = Transaction()
         for (position in stale) tx.remove(position)
-        for ((position, value) in incoming) {
-            if (position in cacheRange) tx.put(position, value, confirmOnRewrite)
-        }
+        for ((position, value, key) in keyed) tx.put(position, value, key, confirmOnRewrite)
         return tx.commit()
     }
 
@@ -115,8 +117,7 @@ internal class KeyedCache<T>(private val itemKey: (T) -> Any) {
             rekeyed.remove(position)
         }
 
-        fun put(position: Int, value: T, confirmOnRewrite: Boolean) {
-            val key = itemKey(value)
+        fun put(position: Int, value: T, key: Any, confirmOnRewrite: Boolean) {
             val oldKey = positionKeys[position]
             valuesBuilder[position] = value
             if (oldKey == key) {

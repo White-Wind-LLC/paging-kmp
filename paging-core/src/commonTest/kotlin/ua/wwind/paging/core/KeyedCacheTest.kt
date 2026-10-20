@@ -1,5 +1,6 @@
 package ua.wwind.paging.core
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import kotlin.test.Test
 
@@ -219,6 +220,34 @@ class KeyedCacheTest {
 
         cache.keys shouldBe mapOf<Int, Any>(5 to 20)
         (20 in cache.values) shouldBe false
+        cache.hiddenPositions shouldBe emptySet()
+    }
+
+    @Test
+    fun throwingItemKey_leavesCacheUnchanged() {
+        val cache = KeyedCache<Pair<String, Int>> {
+            check(it.first != "boom") { "bad key" }
+            it.first
+        }
+        cache.write(mapOf(19 to ("u" to 1), 20 to ("u" to 1)), range, pruneExisting = false, confirmOnRewrite = false)
+        val before = listOf(cache.values, cache.visible, cache.keys, cache.hiddenPositions.toSet())
+
+        shouldThrow<IllegalStateException> {
+            cache.write(
+                incoming = mapOf(19 to ("x" to 1), 21 to ("boom" to 1)),
+                cacheRange = 10..30,
+                pruneExisting = true,
+                confirmOnRewrite = false,
+            )
+        }
+
+        listOf(cache.values, cache.visible, cache.keys, cache.hiddenPositions.toSet()) shouldBe before
+        // Rewriting the hidden copy changes nothing, as if the failed write never happened.
+        cache.write(mapOf(19 to ("u" to 1)), range, pruneExisting = false, confirmOnRewrite = false)
+        cache.keys shouldBe mapOf(20 to "u")
+        cache.hiddenPositions shouldBe setOf(19)
+        cache.write(mapOf(19 to ("x" to 1)), range, pruneExisting = false, confirmOnRewrite = false)
+        cache.keys shouldBe mapOf(19 to "x", 20 to "u")
         cache.hiddenPositions shouldBe emptySet()
     }
 }
