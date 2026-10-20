@@ -52,6 +52,7 @@ public class PagingMediator<T, Q>(
             preloadSize = config.prefetchSize,
             cacheSize = config.cacheSize,
             concurrency = config.concurrency,
+            itemKey = config.itemKey,
             readData = { position, size -> loadPortion(query, position, size, fetchPermits) },
         )
         return pager.flow
@@ -259,6 +260,11 @@ public interface RemoteDataSource<T, Q> {
  * - [fetchFullRangeOnMiss]: If true, fetch the full requested range when any position is missing.
  * - [emitOutdatedRecords]: If true, emit raw local data before filtering stale records.
  * - [emitIntermediateResults]: If true, emit each fetched portion as it arrives.
+ * - [itemKey]: Optional stable key of an item, exposed through `PagingMap.keyAt`. Same contract as
+ *   `Pager`'s `itemKey`: keys should be unique, must be Bundle-storable and never a `String` starting
+ *   with `PagingMap.FALLBACK_KEY_PREFIX`. A transient duplicate (for example a stale local page next
+ *   to a fresh remote one) is hidden and resolved within the same loading pass. With `null`, every
+ *   key is a fallback and nothing is hidden.
  */
 public data class PagingMediatorConfig<T>(
     val loadSize: Int = 20,
@@ -269,6 +275,7 @@ public data class PagingMediatorConfig<T>(
     val fetchFullRangeOnMiss: Boolean = false,
     val emitOutdatedRecords: Boolean = false,
     val emitIntermediateResults: Boolean = true,
+    val itemKey: ((T) -> Any)? = null,
 ) {
     init {
         require(loadSize > 0) { "loadSize must be > 0" }
