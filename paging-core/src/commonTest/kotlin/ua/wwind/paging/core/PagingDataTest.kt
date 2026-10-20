@@ -38,7 +38,13 @@ class PagingDataTest {
 
         var lastRetriedKey: Int? = null
         val retryFn: (Int) -> Unit = { key -> lastRetriedKey = key }
-        val pagingData = PagingData(data = sourceMap, loadState = LoadState.Success, retry = retryFn)
+        val pagingData =
+            PagingData(
+                data = sourceMap,
+                loadState = LoadState.Success,
+                prefetchState = LoadState.Success,
+                retry = retryFn,
+            )
 
         val mapped: PagingData<String> = pagingData.map { value -> "v=$value" }
 
@@ -62,5 +68,19 @@ class PagingDataTest {
         // retry still callable
         mapped.retry(77)
         lastRetriedKey shouldBe 77
+    }
+
+    @Test
+    fun empty_has_both_states_success() {
+        val empty = PagingData.empty<Int>()
+        empty.loadState shouldBe LoadState.Success
+        empty.prefetchState shouldBe LoadState.Success
+    }
+
+    @Test
+    fun map_carries_prefetch_state() {
+        val error = LoadState.Error(IllegalStateException("x"), 5)
+        val mapped = PagingData(PagingMap.empty<Int>(), LoadState.Success, error) {}.map { it + 1 }
+        mapped.prefetchState shouldBe error
     }
 }

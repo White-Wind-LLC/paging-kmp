@@ -319,6 +319,28 @@ class PagingMediatorTest {
     }
 
     @Test
+    fun cold_start_stays_loading_until_remote_portion_holds_the_key() = runTest {
+        val local = FakeLocal<Item, Unit>(query = Unit)
+        val remote = FakeRemote<Item, Unit> { start, size, _ ->
+            delay(200)
+            DataPortion(totalSize = 100, values = (start..<start + size).associateWith { Item(it) }.toPersistentMap())
+        }
+        val (mediator, _) = buildMediator(local, remote, PagingMediatorConfig())
+
+        var latest: PagingData<Item>? = null
+        val job: Job = launch { mediator.flow(Unit).collectLatest { latest = it } }
+        testScheduler.advanceTimeBy(100)
+        testScheduler.runCurrent()
+
+        // The empty local portion has been merged by now; it does not hold the key.
+        checkNotNull(latest).loadState shouldBe LoadState.Loading
+
+        testScheduler.advanceUntilIdle()
+        checkNotNull(latest).loadState shouldBe LoadState.Success
+        job.cancel()
+    }
+
+    @Test
     fun config_rejects_a_cache_narrower_than_the_prefetch_window() {
         val error = shouldThrow<IllegalArgumentException> {
             PagingMediatorConfig<Item>(loadSize = 20, prefetchSize = 100, cacheSize = 40)

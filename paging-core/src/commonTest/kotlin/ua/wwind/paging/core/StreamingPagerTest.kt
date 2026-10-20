@@ -7,12 +7,16 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -561,6 +565,229 @@ class StreamingPagerTest {
         src.subscribers(0, 5) shouldBe 0
         src.subscribers(5, 5) shouldBe 0
         latest.loadState shouldBe LoadState.Success
+
+        job.cancel()
+    }
+
+    @Test
+    fun jump_to_uncached_area_goes_loading_then_success() = runTest {
+        val src = TestSource<Int>()
+        src.totalFlow.value = 50
+        val (pager, advanceFully) = buildPager(this, source = src)
+
+        var latest: PagingData<Int>? = null
+        // Transitions only: clearing the list must not turn the next unchanged state into one.
+        val loads = mutableListOf<LoadState>()
+        var lastLoad: LoadState? = null
+        val job = launch {
+            pager.flow.collect {
+                latest = it
+                if (lastLoad != it.loadState) loads += it.loadState
+                lastLoad = it.loadState
+            }
+        }
+        advanceFully(10)
+        src.emitPortion(0, 5, (0..4).associateWith { it })
+        src.emitPortion(5, 5, (5..9).associateWith { it })
+        advanceFully(10)
+        loads.clear()
+
+        checkNotNull(latest).data[30]
+        advanceFully(10)
+        latest.loadState shouldBe LoadState.Loading
+        latest.prefetchState shouldBe LoadState.Loading
+
+        // The anchor range lands first: the accessed position is done while the edges still load.
+        src.emitPortion(30, 5, (30..34).associateWith { it })
+        advanceFully(10)
+        latest.loadState shouldBe LoadState.Success
+        latest.prefetchState shouldBe LoadState.Loading
+
+        src.emitPortion(25, 5, (25..29).associateWith { it })
+        src.emitPortion(35, 5, (35..39).associateWith { it })
+        advanceFully(10)
+        latest.prefetchState shouldBe LoadState.Success
+        loads shouldBe listOf(LoadState.Loading, LoadState.Success)
+
+        job.cancel()
+    }
+
+    @Test
+    fun failing_edge_stream_sets_only_prefetch_error() = runTest {
+        var failing = true
+        val boom = IllegalStateException("edge boom")
+        val pager: StreamingPager<Int> = StreamingPager(
+            config = StreamingPagerConfig(
+                loadSize = 5,
+                preloadSize = 5,
+                cacheSize = 100,
+                closeThreshold = 5,
+                keyDebounceMs = 0,
+            ),
+            readTotal = { MutableStateFlow(50) },
+            readPortion = { start, size ->
+                flow {
+                    if (start == 25 && failing) throw boom
+                    emitAll(MutableStateFlow((start..<start + size).associateWith { it }))
+                }
+            },
+        )
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        testScheduler.advanceUntilIdle()
+
+        checkNotNull(latest).data[20]
+        testScheduler.advanceUntilIdle()
+
+        latest.loadState shouldBe LoadState.Success
+        // The key is where the consumer is, not where the failed range starts.
+        latest.prefetchState shouldBe LoadState.Error(boom, 20)
+
+        failing = false
+        latest.retry(20)
+        testScheduler.advanceUntilIdle()
+
+        latest.loadState shouldBe LoadState.Success
+        latest.prefetchState shouldBe LoadState.Success
+        latest.data.values.containsKey(25) shouldBe true
+
+        job.cancel()
+    }
+
+    @Test
+    fun prefetch_error_of_a_range_left_far_outside_the_window_is_dropped() = runTest {
+        val boom = IllegalStateException("edge boom")
+        val pager: StreamingPager<Int> = StreamingPager(
+            config = StreamingPagerConfig(
+                loadSize = 5,
+                preloadSize = 5,
+                cacheSize = 100,
+                closeThreshold = 5,
+                keyDebounceMs = 0,
+            ),
+            readTotal = { MutableStateFlow(100) },
+            readPortion = { start, size ->
+                flow {
+                    if (start == 25) throw boom
+                    emitAll(MutableStateFlow((start..<start + size).associateWith { it }))
+                }
+            },
+        )
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        testScheduler.advanceUntilIdle()
+        checkNotNull(latest).data[20]
+        testScheduler.advanceUntilIdle()
+        latest.prefetchState shouldBe LoadState.Error(boom, 20)
+
+        latest.data[60] // range 25 is now well beyond closeThreshold
+        testScheduler.advanceUntilIdle()
+        latest.loadState shouldBe LoadState.Success
+        latest.prefetchState shouldBe LoadState.Success
+
+        latest.retry(60)
+        testScheduler.advanceUntilIdle()
+        latest.prefetchState shouldBe LoadState.Success
+
+        job.cancel()
+    }
+
+    @Test
+    fun scrolling_back_into_reopened_cached_range_stays_success() = runTest {
+        val opened = mutableSetOf<Int>()
+        val pager: StreamingPager<Int> = StreamingPager(
+            config = StreamingPagerConfig(
+                loadSize = 5,
+                preloadSize = 5,
+                cacheSize = 100,
+                closeThreshold = 5,
+                keyDebounceMs = 0,
+            ),
+            readTotal = { MutableStateFlow(100) },
+            readPortion = { start, size ->
+                flow {
+                    // A reopened range stays silent, so its `Loading` outlives the scroll back.
+                    if (!opened.add(start)) awaitCancellation()
+                    emitAll(MutableStateFlow((start..<start + size).associateWith { it }))
+                }
+            },
+        )
+
+        var latest: PagingData<Int>? = null
+        // Transitions only: clearing the list must not turn the next unchanged state into one.
+        val loads = mutableListOf<LoadState>()
+        var lastLoad: LoadState? = null
+        val job = launch {
+            pager.flow.collect {
+                latest = it
+                if (lastLoad != it.loadState) loads += it.loadState
+                lastLoad = it.loadState
+            }
+        }
+        testScheduler.advanceUntilIdle()
+        checkNotNull(latest).data[30]
+        testScheduler.advanceUntilIdle()
+        latest.data.values.containsKey(2) shouldBe true
+        loads.clear()
+
+        latest.data[2]
+        testScheduler.advanceUntilIdle()
+
+        latest.prefetchState shouldBe LoadState.Loading
+        latest.loadState shouldBe LoadState.Success
+        loads shouldBe emptyList()
+
+        job.cancel()
+    }
+
+    @Test
+    fun read_total_failure_sets_load_state_error_and_retry_recovers() = runTest {
+        var totalCalls = 0
+        val boom = IllegalStateException("total boom")
+        val portionsServed = MutableStateFlow(false)
+        val pager: StreamingPager<Int> = StreamingPager(
+            config = StreamingPagerConfig(
+                loadSize = 5,
+                preloadSize = 5,
+                cacheSize = 100,
+                closeThreshold = 5,
+                keyDebounceMs = 0,
+            ),
+            readTotal = {
+                flow {
+                    // Fails after the speculative first page has been opened, so the error lands on it.
+                    if (++totalCalls == 1) {
+                        delay(100)
+                        throw boom
+                    }
+                    emitAll(MutableStateFlow(10))
+                }
+            },
+            readPortion = { start, size ->
+                portionsServed.filter { it }.map { (start..<start + size).associateWith { it } }
+            },
+        )
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        testScheduler.advanceUntilIdle()
+
+        latest?.loadState shouldBe LoadState.Error(boom, 0)
+        latest?.prefetchState shouldBe LoadState.Success
+
+        checkNotNull(latest).retry(0)
+        testScheduler.advanceUntilIdle()
+        latest.loadState shouldBe LoadState.Loading
+
+        portionsServed.value = true
+        testScheduler.advanceUntilIdle()
+
+        latest.data.size shouldBe 10
+        latest.data.values.size shouldBe 10
+        latest.loadState shouldBe LoadState.Success
+        latest.prefetchState shouldBe LoadState.Success
 
         job.cancel()
     }

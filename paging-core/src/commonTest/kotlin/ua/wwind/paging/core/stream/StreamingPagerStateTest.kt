@@ -2,20 +2,22 @@ package ua.wwind.paging.core.stream
 
 import co.touchlab.kermit.Logger
 import io.kotest.matchers.shouldBe
+import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import ua.wwind.paging.core.LoadState
+import ua.wwind.paging.core.PagingMap
 import kotlin.test.Test
 
 /**
- * Tests for the aggregated load state of `StreamingPager` (#12).
+ * Tests for the load states `StreamingPager` derives from its per-range states (#11, #12).
  *
- * The per-range map changes far more often than the single state derived from it: every message of
- * every portion stream touches it, and only the first one of a range moves the aggregate. Each
- * repeat used to reach the UI as another `PagingData`.
+ * `loadState` follows the range holding the anchor key, `prefetchState` aggregates the others. The
+ * per-range map changes on every streamed message, so both flows must drop repeats.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class StreamingPagerStateTest {
@@ -26,41 +28,101 @@ class StreamingPagerStateTest {
         logger = Logger,
     )
 
+    private val boom = IllegalStateException("boom")
+
     @Test
-    fun a_range_settling_while_another_is_loading_does_not_re_emit_the_load_state() = runTest {
+    fun initial_states_are_loading_and_success() = runTest {
         val state = state()
-        val seen = mutableListOf<LoadState>()
-        val job = launch { state.loadStateFlow.collect { seen += it } }
-        runCurrent()
 
-        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Loading, 5..9 to LoadState.Loading)
-        runCurrent()
-        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Success, 5..9 to LoadState.Loading)
-        runCurrent()
-
-        // The aggregate never left Loading, so the UI has nothing new to render.
-        seen shouldBe listOf(LoadState.Loading)
-
-        job.cancel()
+        state.loadStateFlow.first() shouldBe LoadState.Loading
+        state.prefetchStateFlow.first() shouldBe LoadState.Success
     }
 
     @Test
-    fun a_real_transition_is_still_reported() = runTest {
+    fun load_state_follows_only_the_anchor_range() = runTest {
         val state = state()
-        val seen = mutableListOf<LoadState>()
-        val job = launch { state.loadStateFlow.collect { seen += it } }
-        runCurrent()
+        state.anchorKey.value = 2
+        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Success, 5..9 to LoadState.Loading)
 
+        state.loadStateFlow.first() shouldBe LoadState.Success
+        state.prefetchStateFlow.first() shouldBe LoadState.Loading
+    }
+
+    @Test
+    fun anchor_loading_over_missing_item_is_loading() = runTest {
+        val state = state()
+        state.anchorKey.value = 2
         state.rangeLoadStates.value = mapOf(0..4 to LoadState.Loading)
-        runCurrent()
-        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Success)
-        runCurrent()
-        val boom = IllegalStateException("boom")
-        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Error(boom, 0))
+
+        state.loadStateFlow.first() shouldBe LoadState.Loading
+    }
+
+    @Test
+    fun anchor_loading_over_cached_item_is_success() = runTest {
+        val state = state()
+        state.anchorKey.value = 2
+        state.data.value = PagingMap(10, persistentMapOf(2 to 2)) {}
+        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Loading)
+
+        state.loadStateFlow.first() shouldBe LoadState.Success
+    }
+
+    @Test
+    fun errors_carry_the_anchor_key() = runTest {
+        val state = state()
+        state.anchorKey.value = 7
+        state.rangeLoadStates.value = mapOf(5..9 to LoadState.Error(boom, 5))
+
+        state.loadStateFlow.first() shouldBe LoadState.Error(boom, 7)
+
+        state.rangeLoadStates.value = mapOf(0..4 to LoadState.Error(boom, 0), 5..9 to LoadState.Success)
+
+        state.loadStateFlow.first() shouldBe LoadState.Success
+        state.prefetchStateFlow.first() shouldBe LoadState.Error(boom, 7)
+    }
+
+    @Test
+    fun prefetch_loading_outranks_error() = runTest {
+        val state = state()
+        state.anchorKey.value = 7
+        state.rangeLoadStates.value = mapOf(
+            0..4 to LoadState.Error(boom, 0),
+            5..9 to LoadState.Success,
+            10..14 to LoadState.Loading,
+        )
+
+        state.prefetchStateFlow.first() shouldBe LoadState.Loading
+    }
+
+    @Test
+    fun streamed_messages_do_not_re_emit_unchanged_states() = runTest {
+        val state = state()
+        state.anchorKey.value = 2
+        val loads = mutableListOf<LoadState>()
+        val prefetches = mutableListOf<LoadState>()
+        val jobs = listOf(
+            launch { state.loadStateFlow.collect { loads += it } },
+            launch { state.prefetchStateFlow.collect { prefetches += it } },
+        )
         runCurrent()
 
-        seen shouldBe listOf(LoadState.Loading, LoadState.Success, LoadState.Error(boom, 0))
+        state.rangeLoadStates.value =
+            mapOf(0..4 to LoadState.Loading, 5..9 to LoadState.Loading, 10..14 to LoadState.Loading)
+        runCurrent()
+        // A side range settling while another one still loads changes neither state.
+        state.rangeLoadStates.value =
+            mapOf(0..4 to LoadState.Loading, 5..9 to LoadState.Success, 10..14 to LoadState.Loading)
+        runCurrent()
+        state.rangeLoadStates.value =
+            mapOf(0..4 to LoadState.Success, 5..9 to LoadState.Success, 10..14 to LoadState.Loading)
+        runCurrent()
+        state.rangeLoadStates.value =
+            mapOf(0..4 to LoadState.Success, 5..9 to LoadState.Success, 10..14 to LoadState.Success)
+        runCurrent()
 
-        job.cancel()
+        loads shouldBe listOf(LoadState.Loading, LoadState.Success)
+        prefetches shouldBe listOf(LoadState.Success, LoadState.Loading, LoadState.Success)
+
+        jobs.forEach { it.cancel() }
     }
 }

@@ -10,10 +10,9 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -38,6 +37,15 @@ import kotlin.concurrent.Volatile
 internal fun Map<IntRange, LoadState>?.withRangeState(range: IntRange, state: LoadState): Map<IntRange, LoadState> {
     if (this != null && this[range] == state) return this
     return this.orEmpty() + (range to state)
+}
+
+/** `Loading > Error > Success`; an error is reported at [key], the position a retry should name. */
+private fun Collection<LoadState>.aggregate(key: Int): LoadState = when {
+    LoadState.Loading in this -> LoadState.Loading
+
+    else -> filterIsInstance<LoadState.Error>().firstOrNull()
+        ?.let { LoadState.Error(it.throwable, key) }
+        ?: LoadState.Success
 }
 
 /** How long a hidden position's window may stay live and silent before its duplicate counts as real. */
@@ -92,19 +100,32 @@ internal class StreamingPagerState<T>(
 
     val rangeLoadStates: MutableStateFlow<Map<IntRange, LoadState>?> = MutableStateFlow(null)
 
-    val loadStateFlow: Flow<LoadState> = rangeLoadStates
-        .map { stateMap ->
-            if (stateMap == null || stateMap.values.contains(LoadState.Loading)) {
-                LoadState.Loading
-            } else {
-                val firstError = stateMap.values.firstOrNull { it is LoadState.Error }
-                firstError ?: LoadState.Success
-            }
+    /**
+     * The key the window was last planned around, published for the derived states. A shrink that drops it
+     * moves it to the new last index, or to 0 when the list empties.
+     */
+    val anchorKey: MutableStateFlow<Int> = MutableStateFlow(0)
+
+    /**
+     * State of the accessed position: the range holding [anchorKey], where `Loading` over an
+     * already cached item counts as `Success`.
+     */
+    val loadStateFlow: Flow<LoadState> = combine(rangeLoadStates, data, anchorKey) { stateMap, map, key ->
+        if (stateMap == null) return@combine LoadState.Loading
+        // Several entries can hold the key when an errored range outlives a replan onto another grid.
+        when (val anchor = stateMap.filterKeys { key in it }.values.aggregate(key)) {
+            LoadState.Loading -> if (map.values.containsKey(key)) LoadState.Success else LoadState.Loading
+            else -> anchor
         }
-        .onStart { emit(LoadState.Loading) }
+    }
         // The map underneath changes on every streamed message; the state derived from it rarely
         // does. Without this, each repeat travels through `combine` as another `PagingData`.
         .distinctUntilChanged()
+
+    /** Aggregate state of every range that does not hold [anchorKey]. */
+    val prefetchStateFlow: Flow<LoadState> = combine(rangeLoadStates, anchorKey) { stateMap, key ->
+        stateMap.orEmpty().filterKeys { key !in it }.values.aggregate(key)
+    }.distinctUntilChanged()
 
     val activeStreams: MutableMap<IntRange, Job> = LinkedHashMap()
 
@@ -229,7 +250,10 @@ internal class StreamingPagerState<T>(
         // `newTotal - 1`; on an empty total we fall back to 0 rather than a negative key.
         val lastValidKey = (newTotal - 1).coerceAtLeast(0)
         val keyFellOffTheEnd = lastReadKey >= newTotal
-        if (keyFellOffTheEnd) lastAccessedKey = lastValidKey
+        if (keyFellOffTheEnd) {
+            lastAccessedKey = lastValidKey
+            anchorKey.value = lastValidKey
+        }
 
         // A range the new end only clipped keeps its rows cached, so `settledRange` swallows every
         // later access to them and nothing would reopen the part that survived; replanning covers
@@ -281,16 +305,24 @@ internal class StreamingPagerState<T>(
 
         previousKey = lastReadKey
         lastReadKey = key
+        anchorKey.value = key
         settledRange.value = data.value.settledRangeAround(lastReadKey, margin = config.loadSize)
     }
 
     /**
      * Cancels the streams that sit further than [StreamingPagerConfig.closeThreshold] outside
-     * [window]. Expects [mutex] to be held.
+     * [window], and drops the errors of ended streams that far out. Expects [mutex] to be held.
      */
     private fun closeStreamsOutsideWindowLocked(window: IntRange) {
         val toCloseNow = activeStreams.keys.filter { r ->
             distanceBeyondWindow(window, r) > config.closeThreshold
+        }
+        // An ended stream's error lives only while its range is still wanted; a retry would not reopen it.
+        val staleErrors = rangeLoadStates.value.orEmpty().filter { (r, state) ->
+            state is LoadState.Error && r !in activeStreams && distanceBeyondWindow(window, r) > config.closeThreshold
+        }.keys
+        if (staleErrors.isNotEmpty()) {
+            rangeLoadStates.update { current: Map<IntRange, LoadState>? -> current?.minus(staleErrors) }
         }
         if (toCloseNow.isNotEmpty()) {
             logger.d {

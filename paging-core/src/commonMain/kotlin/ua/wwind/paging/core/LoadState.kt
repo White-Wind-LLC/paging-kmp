@@ -1,12 +1,13 @@
 package ua.wwind.paging.core
 
 /**
- * Represents the global loading state of the paging operation.
+ * Represents the loading state of a paging operation.
  *
- * LoadState provides a high-level view of what the Pager is currently doing,
- * allowing UI components to show appropriate feedback to users. Unlike
- * EntryState which represents individual item states, LoadState represents
- * the overall paging operation status.
+ * [PagingData] carries two of these. `loadState` describes the accessed position only:
+ * `Loading` while the item there is missing and being fetched, `Error` when that fetch
+ * fails, `Success` otherwise (scrolling over cached data never changes it).
+ * `prefetchState` describes the background fill of the rest of the preload window
+ * (`Loading > Error > Success`) and never affects `loadState`.
  *
  * This follows a sealed interface pattern for exhaustive state handling
  * and type safety in reactive UI patterns.
@@ -15,12 +16,11 @@ public sealed interface LoadState {
     /**
      * Indicates that a paging operation is currently in progress.
      *
-     * This state is active when:
-     * - Initial data is being loaded for the first time
-     * - Additional data is being fetched due to user scrolling
-     * - Retry operations are being executed after an error
+     * As `loadState` this is active only while the item at the accessed position is
+     * not cached and a fetch covering it is in flight: the first load, a refresh, or
+     * a jump into an uncached area. As `prefetchState` it means the rest of the window
+     * is still being filled.
      *
-     * UI should typically show a loading indicator during this state.
      * Individual items may still be accessible through EntryState.Success
      * for previously loaded data.
      */
@@ -29,28 +29,28 @@ public sealed interface LoadState {
     /**
      * Indicates that a paging operation failed with an error.
      *
-     * This state preserves both the error details and the position that
-     * triggered the failed load, enabling targeted retry functionality.
+     * This state preserves the error details and the current accessed position,
+     * enabling targeted retry: `retry(error.key)` re-plans the window where the
+     * user is.
      *
      * The paging system remains functional - previously loaded data stays
      * available, and users can retry the failed operation or navigate to
      * different positions that might load successfully.
      *
      * @param throwable The exception that caused the loading failure
-     * @param key The position that was being loaded when the error occurred
+     * @param key The current accessed position
      */
     public data class Error(val throwable: Throwable, val key: Int) : LoadState
 
     /**
-     * Indicates that the most recent paging operation completed successfully.
+     * Indicates that nothing is pending or failed for the part this state describes.
      *
-     * This state means:
-     * - All requested data has been loaded without errors
-     * - The cache has been updated with new items
-     * - The system is ready for the next loading operation
+     * As `loadState` it means the item at the accessed position is cached, or no fetch
+     * covering it is in flight or has failed; the rest of the window may still be
+     * loading or have failed, which `prefetchState` reports. As `prefetchState` it means
+     * the rest of the window has been filled without errors.
      *
-     * Note: Success doesn't mean ALL data is loaded, just that the most
-     * recent loading request completed successfully. There may still be
+     * Note: Success doesn't mean ALL data is loaded. There may still be
      * unloaded items in other parts of the dataset.
      */
     public data object Success : LoadState

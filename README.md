@@ -122,6 +122,10 @@ pager.flow.collect { pagingData ->
 }
 ```
 
+`loadState` is `Loading` only while the item at the accessed position is missing and being fetched, and `Error` when
+that fetch fails; scrolling over cached data never changes it. The rest of the preload window is reported separately in
+`pagingData.prefetchState`, and its failures do not affect `loadState`.
+
 ## Core Concepts
 
 ### Positional keys (Int)
@@ -138,9 +142,9 @@ query/filter). This is what enables random access, jump-to-index, and accurate s
 
 | Type | Purpose |
 |------|---------|
-| `PagingData<T>` | Immutable snapshot: the data window, the global `loadState`, and a `retry(key)` callback. |
+| `PagingData<T>` | Immutable snapshot: the data window, `loadState` (the accessed position), `prefetchState` (background fill of the rest of the window), and a `retry(key)` callback. |
 | `PagingMap<T>` | Sparse `position -> item` map. Reading a position notifies the pager (`onGet`) and may trigger a load. Knows the total `size`. |
-| `LoadState` | Global state: `Loading` · `Success` · `Error(throwable, key)`. |
+| `LoadState` | Used for both `loadState` and `prefetchState`: `Loading` · `Success` · `Error(throwable, key)`. `key` is the current accessed position. |
 | `EntryState<T>` | Per-item state: `Loading` or `Success(value)`. Use `getOrNull()` for a quick value-or-null read. |
 | `DataPortion<T>` | The contract returned by your data source: `totalSize` + a `PersistentMap<Int, T>` of loaded values. |
 
@@ -149,7 +153,7 @@ query/filter). This is what enables random access, jump-to-index, and accurate s
 `PagingData` is a complete snapshot of the list, so only the newest one is ever worth rendering. Both pagers therefore
 expose a **conflated** `flow`: a collector that falls behind — a slow frame, or a live stream pushing faster than the UI
 draws — is handed the current state instead of a backlog of snapshots it would render and immediately discard. No data
-is lost this way, since every snapshot carries the whole window; only intermediate `LoadState` transitions can be
+is lost this way, since every snapshot carries the whole window; only intermediate `loadState` / `prefetchState` transitions can be
 skipped.
 
 ### Retry and refresh
@@ -157,7 +161,7 @@ skipped.
 Both bypass the key debounce and reload immediately:
 
 - **`pagingData.retry(key)`** — re-runs the load that failed. Passing the key the error reported
-  (`retry(loadState.key)`) is the intended call; the ranges that are still missing around it are fetched again, and
+  (`retry(loadState.key)` or `retry(prefetchState.key)`) is the intended call; the ranges that are still missing around it are fetched again, and
   everything already cached is kept.
 - **`pager.refresh()`** — drops the cache and reloads the window around the position last accessed, cancelling the
   in-flight load first so it cannot write stale items back. Use it when the underlying dataset changed as a whole
@@ -204,6 +208,8 @@ fun UserList() {
     }
 }
 ```
+
+`loadState` and `prefetchState` mean the same as in the [Quick Start](#quick-start).
 
 ### Compose stability
 
@@ -301,8 +307,8 @@ It then:
 - Closes streams gracefully once the viewport moves farther than `closeThreshold` away — so you only hold open
   subscriptions for what's on screen.
 - Keeps a bounded cache window (`cacheSize`) and prunes out-of-bounds items.
-- Aggregates per-window `LoadState` (priority: `Loading > Error > Success`) and **survives `readTotal` failures**,
-  recovering on `retry`.
+- Reports `loadState` for the range holding the accessed position and aggregates the other windows into
+  `prefetchState` (priority: `Loading > Error > Success`); it **survives `readTotal` failures**, recovering on `retry`.
 
 > **`preloadSize` and `cacheSize` are radii, not totals.** Both are measured in indices from the last accessed
 > position, so a cache of `100` holds roughly `200` items. `cacheSize` must be `>= preloadSize` — otherwise the pager
@@ -376,6 +382,8 @@ pager.flow.collect { pagingData ->
 }
 ```
 
+`loadState` reports only the accessed position; background prefetch of the rest of the window is in `pagingData.prefetchState`.
+
 > The same model works with **WebSockets** or any other push transport — just back `readTotal` / `readPortion` with the
 > flow of your choice. Positions must be absolute across the dataset; when the total shrinks, out-of-bounds streams are
 > cancelled and cached values pruned automatically, and a stream the new end only clipped is reopened for the part of
@@ -436,7 +444,7 @@ Transform items while preserving loading state and retry logic:
 
 ```kotlin
 val mapped: PagingData<String> = pagingData.map { user -> "${user.id}: ${user.name}" }
-// Only currently-loaded items are transformed; loadState and retry are preserved.
+// Only currently-loaded items are transformed; loadState, prefetchState and retry are preserved.
 ```
 
 ## Supported Platforms
