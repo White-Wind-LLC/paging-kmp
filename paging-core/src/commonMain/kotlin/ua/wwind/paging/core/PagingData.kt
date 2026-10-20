@@ -46,6 +46,7 @@ public data class PagingData<T>(val data: PagingMap<T>, val loadState: LoadState
      * paging state and retry functionality.
      *
      * Applies transformation only to currently loaded items, not future ones.
+     * Item keys ([PagingMap.keyAt]) are preserved.
      */
     public fun <R> map(transform: (T) -> R): PagingData<R> =
         PagingData(data = data.mapValues(transform), loadState = loadState, retry = retry)
