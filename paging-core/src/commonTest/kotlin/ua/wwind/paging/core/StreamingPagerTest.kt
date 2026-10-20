@@ -126,6 +126,28 @@ class StreamingPagerTest {
     }
 
     @Test
+    fun partial_portion_updates_only_its_rows() = runTest {
+        val src = TestSource<Int>()
+        src.totalFlow.value = 50
+        val (pager, advanceFully) = buildPager(this, source = src)
+
+        var latest: PagingData<Int>? = null
+        val job = launch { pager.flow.collect { latest = it } }
+        advanceFully(50)
+        checkNotNull(latest).data[0]
+        advanceFully(50)
+        src.emitPortion(0, 5, (0..4).associateWith { it })
+        advanceFully(10)
+
+        src.emitPortion(0, 5, mapOf(2 to 200))
+        advanceFully(10)
+
+        checkNotNull(latest).data.values shouldBe mapOf(0 to 0, 1 to 1, 2 to 200, 3 to 3, 4 to 4)
+
+        job.cancel()
+    }
+
+    @Test
     fun total_shrink_prunes_out_of_bounds() = runTest {
         val src = TestSource<Int>()
         src.totalFlow.value = 20
