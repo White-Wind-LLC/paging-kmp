@@ -284,22 +284,26 @@ class DiagnosticsFindingsTest {
     // ------------------------------------------------------------------- F7
 
     /**
-     * F7: StreamingPager's global LoadState flips to Loading whenever the
-     * window shifts, even when every visible item is already cached. UI code
-     * following the README (`LoadState.Loading -> showLoader()`) flashes a
-     * spinner on ordinary scrolling.
+     * F7 (fixed): StreamingPager's global LoadState used to flip to Loading whenever the window
+     * shifted, even when every visible item was already cached, so UI code following the README
+     * (`LoadState.Loading -> showLoader()`) flashed a spinner on ordinary scrolling.
+     *
+     * `loadState` now follows only the accessed position; the edge streams the shift opens are
+     * reported through `prefetchState`.
      */
     @Test
-    fun f7_streaming_loadstate_flaps_on_scroll_over_cached_data() = runTest {
+    fun f7_streaming_loadstate_stays_success_on_scroll_over_cached_data() = runTest {
         val s = FakeStream(1_000)
         val p = streamingPager(s, ua.wwind.paging.core.stream.StreamingPagerConfig(20, 60, 100))
         val transitions = mutableListOf<String>()
+        var last: String? = null
         var latest: PagingData<String>? = null
         val job = launch {
             p.flow.collectLatest {
                 latest = it
                 val n = it.loadState::class.simpleName!!
-                if (transitions.lastOrNull() != n) transitions += n
+                if (last != n) transitions += n
+                last = n
             }
         }
         testScheduler.advanceUntilIdle()
@@ -308,7 +312,7 @@ class DiagnosticsFindingsTest {
         checkNotNull(latest).data[70] // small scroll, data already cached
         testScheduler.advanceUntilIdle()
 
-        transitions shouldBe listOf("Loading", "Success")
+        transitions shouldBe emptyList()
         job.cancel()
     }
 

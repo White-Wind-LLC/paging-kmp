@@ -75,7 +75,8 @@ public data class StreamingPagerConfig(
  * - Flows are closed when they move farther than `config.closeThreshold` beyond the active window.
  * - When the total size shrinks, out-of-bounds flows are cancelled and cached items are pruned; a flow the new
  *   end only clipped is reopened for the part of its range that survives.
- * - Load state is aggregated from per-range states with priority: Loading > Error > Success.
+ * - `loadState` follows the range holding the last planned key, and is `Loading` only while the item
+ *   there is not cached; `prefetchState` aggregates the other ranges with priority Loading > Error > Success.
  *
  * @property config Paging behavior configuration (see `StreamingPagerConfig`).
  * @property readTotal Provider of a continuous flow with the current total item count.
@@ -145,8 +146,12 @@ public class StreamingPager<T>(
         val retryKeys: MutableSharedFlow<Int> = MutableSharedFlow(extraBufferCapacity = 64)
 
         val emitter = launch {
-            combine(state.data, state.loadStateFlow) { data: PagingMap<T>, loadState ->
-                PagingData(data, loadState, LoadState.Success) { key ->
+            combine(
+                state.data,
+                state.loadStateFlow,
+                state.prefetchStateFlow,
+            ) { data: PagingMap<T>, loadState, prefetchState ->
+                PagingData(data, loadState, prefetchState) { key ->
                     // Not through `onGet`: a retry has to reach the planner even from inside the
                     // settled range.
                     retryKeys.tryEmit(key)
