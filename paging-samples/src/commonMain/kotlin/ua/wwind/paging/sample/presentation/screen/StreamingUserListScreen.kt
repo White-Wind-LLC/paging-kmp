@@ -104,6 +104,7 @@ fun StreamingUserListScreen(viewModel: StreamingUserListViewModel, modifier: Mod
                             items(count = data.data.size, key = { data.data.keyAt(it) }) { index ->
                                 when (val entry = data.data[index]) {
                                     EntryState.Loading -> LoadingItem(index)
+
                                     is EntryState.Success -> UserCard(
                                         user = entry.value,
                                         modifier = Modifier.animateItem(),
