@@ -17,6 +17,9 @@ All notable changes to this project will be documented in this file.
   every map a consumer sees (#54). Its public constructor `(size, values, onGet)` creates a map with fallback keys only;
   `copy(size, values, onGet)` keeps a position's key only while that position holds an equal value. `equals`,
   `hashCode` and `toString` stay; the `componentN` functions (destructuring) are gone.
+- `paging-samples` key their lists by user id through `itemKey` and `keyAt` instead of by index, so rows keep their
+  state and animate when items are inserted or removed above them (#15). The streaming sample gains an "Insert at top"
+  button that adds a user with a new id.
 - Binary compatibility: libraries compiled against 2.3.x that call the `Pager`, `StreamingPager` or
   `PagingMediatorConfig` constructors, or `PagingMap.copy` / `PagingMediatorConfig.copy`, must be recompiled against
   2.4.0.

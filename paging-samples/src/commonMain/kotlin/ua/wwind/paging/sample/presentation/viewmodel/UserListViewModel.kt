@@ -8,6 +8,7 @@ import ua.wwind.paging.core.LocalDataSource
 import ua.wwind.paging.core.Pager
 import ua.wwind.paging.core.PagingData
 import ua.wwind.paging.core.PagingMediator
+import ua.wwind.paging.core.PagingMediatorConfig
 import ua.wwind.paging.sample.domain.model.User
 import ua.wwind.paging.sample.domain.repository.UserRemoteDataSource
 import ua.wwind.paging.sample.presentation.viewmodel.adapters.UserRemoteDataSourceAdapter
@@ -27,6 +28,7 @@ class UserListViewModel(
         val mediator = PagingMediator<User, Unit>(
             local = local,
             remote = UserRemoteDataSourceAdapter(remote),
+            config = PagingMediatorConfig(itemKey = { it.id }),
         )
         mediator.flow(Unit)
     } else {
@@ -34,6 +36,7 @@ class UserListViewModel(
             loadSize = 20,
             preloadSize = 60,
             cacheSize = 100,
+            itemKey = { it.id },
             readData = ::loadUsersDirect,
         )
         pager.flow
