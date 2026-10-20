@@ -1,6 +1,5 @@
 package ua.wwind.paging.core
 
-import arrow.core.toNonEmptyListOrNull
 import kotlinx.collections.immutable.PersistentMap
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.coroutines.CancellationException
@@ -168,12 +167,7 @@ public class Pager<T>(
         // Mutex to ensure thread-safe access to internal state
         val mutex = Mutex()
 
-        // Touched only under `mutex`
-        val keyedCache: KeyedCache<T>? = itemKey?.let { KeyedCache(it) }
-
-        // Set when a keyed pass ends with hidden positions: reading one must reload its page even
-        // when the consumer settles back on the position it last requested.
-        val holesLeft = MutableStateFlow(false)
+        val keyed: KeyedState<T>? = itemKey?.let { KeyedState(KeyedCache(it)) }
 
         // Track the last position that was requested for optimization
         var lastReadKey: Int = -1
@@ -200,10 +194,10 @@ public class Pager<T>(
             // consumer is - see `lastAccessed`.
             .map { lastAccessed.value }
         val accessRequests: Flow<LoadRequest> =
-            if (keyedCache == null) {
+            if (keyed == null) {
                 accessKeys.distinctUntilChanged()
             } else {
-                accessKeys.distinctUntilChanged { old, new -> old == new && !holesLeft.value }
+                accessKeys.distinctUntilChanged { old, new -> old == new && !keyed.holesLeft }
             }.map { key -> LoadRequest(key, Reason.Access) }
 
         // One collector drives every load, so the scheduling state above is touched from a single
@@ -224,11 +218,11 @@ public class Pager<T>(
                         currentLoadJob?.cancelAndJoin()
                         currentLoadJob = null
                         currentLoadingRange = null
-                        if (keyedCache == null) {
+                        if (keyed == null) {
                             data.update { it.copy(values = persistentMapOf()) }
                         } else {
                             mutex.withLock {
-                                keyedCache.clear()
+                                keyed.clearLocked()
                                 data.update { PagingMap(it.size, persistentMapOf(), ::onGet) }
                             }
                         }
@@ -266,8 +260,7 @@ public class Pager<T>(
                         primaryDirection = direction,
                         onGet = ::onGet,
                         settledRange = settledRange,
-                        keyedCache = keyedCache,
-                        holesLeft = holesLeft,
+                        keyed = keyed,
                     )
                 }
                 currentLoadJob = job
@@ -323,8 +316,7 @@ public class Pager<T>(
         primaryDirection: Direction,
         onGet: (Int) -> Unit,
         settledRange: MutableStateFlow<IntRange>,
-        keyedCache: KeyedCache<T>?,
-        holesLeft: MutableStateFlow<Boolean>,
+        keyed: KeyedState<T>?,
     ) {
         try {
             settledRange.value = IntRange.EMPTY
@@ -337,8 +329,7 @@ public class Pager<T>(
                 loadStateFlow = loadStateFlow,
                 mutex = mutex,
                 onGet = onGet,
-                keyedCache = keyedCache,
-                holesLeft = holesLeft,
+                keyed = keyed,
             )
             // A page of lead time before the edge is what keeps the window moving ahead of a scroll
             settledRange.value = dataFlow.value.settledRangeAround(key, margin = loadSize)
@@ -346,6 +337,8 @@ public class Pager<T>(
             // Preserve cancellation for proper coroutine cleanup
             throw e
         } catch (e: Exception) {
+            // The error already makes the consumer retry; holes alone must not reload as well.
+            keyed?.holesLeft = false
             // Convert other exceptions to LoadState.Error for retry handling
             loadStateFlow.value = LoadState.Error(e, key)
         }
@@ -437,9 +430,9 @@ public class Pager<T>(
      * window before the first fetch. [mutex] serialises the merges - concurrent fetches share one
      * accumulator - and is never held across a fetch.
      *
-     * With [keyedCache], key conflicts left at the end of the pass get one more round: every grid
-     * cell holding a position of a conflicting key is refetched once, then each of those conflicts
-     * that the refetch rewrote and that still sits on the same positions is confirmed.
+     * With [keyed], key conflicts left at the end of the pass get one more round (see
+     * [resolveConflicts]). A pass with nothing to fetch still runs it while the cache holds
+     * conflicts no round has tried yet, such as ones left by a superseded pass.
      */
     private suspend fun runLoads(
         plan: LoadPlan,
@@ -448,11 +441,10 @@ public class Pager<T>(
         loadStateFlow: MutableStateFlow<LoadState>,
         mutex: Mutex,
         onGet: (Int) -> Unit,
-        keyedCache: KeyedCache<T>?,
-        holesLeft: MutableStateFlow<Boolean>,
+        keyed: KeyedState<T>?,
     ) {
-        val chunks = plan.chunks.toNonEmptyListOrNull()
-        if (chunks == null) {
+        val chunks = plan.chunks
+        if (chunks.isEmpty() && (keyed == null || mutex.withLock { keyed.untriedConflictsLocked().isEmpty() })) {
             // Nothing to fetch. A superseded pass may have set Loading and been cancelled before its
             // own Success, so settle that here; an Error is left for the consumer to retry.
             loadStateFlow.compareAndSet(LoadState.Loading, LoadState.Success)
@@ -461,46 +453,20 @@ public class Pager<T>(
 
         // Apply cache size limit (immutable). We must avoid mutating the same Map instance
         // across emissions, otherwise StateFlow's equality check can suppress updates.
-        val cache = if (keyedCache == null) {
-            CacheAccumulator(cachedValues.pruneToRange(plan.cacheRange), plan.cacheRange)
+        val cache: CacheAccumulator<T> = if (keyed == null) {
+            UnkeyedAccumulator(cachedValues.pruneToRange(plan.cacheRange), plan.cacheRange)
         } else {
-            CacheAccumulator(persistentMapOf(), plan.cacheRange, keyedCache)
+            KeyedAccumulator(keyed, plan.cacheRange)
         }
 
-        loadStateFlow.value = LoadState.Loading // Signal loading started
+        if (chunks.isNotEmpty()) loadStateFlow.value = LoadState.Loading // Signal loading started
         val permits = Semaphore(concurrency)
         fetchChunks(chunks, permits, mutex, readData) { portion ->
             // Build a new immutable map snapshot for each emission to ensure StateFlow emits
             dataFlow.value = cache.next(dataFlow.value, portion, onGet)
         }
-        if (keyedCache != null) {
-            val (conflicts, conflictCells) = mutex.withLock {
-                currentCoroutineContext().ensureActive()
-                val conflicts = keyedCache.unconfirmedConflicts()
-                val limit = dataFlow.value.size - 1
-                conflicts to conflicts.values.flatten()
-                    .map { gridCellAt(it, limit) }
-                    .filterNot { it.isEmpty() }
-                    .distinct()
-            }
-            val refetched = HashSet<Int>()
-            fetchChunks(conflictCells, permits, mutex, readData) { portion ->
-                refetched += portion.values.keys
-                dataFlow.value = cache.next(dataFlow.value, portion, onGet)
-            }
-            mutex.withLock {
-                currentCoroutineContext().ensureActive()
-                // Only conflicts whose every position was just rewritten; ones that arose in this
-                // round, or whose refetch wrote nothing there, stay hidden for the next pass.
-                val remaining = keyedCache.unconfirmedConflicts()
-                val confirmed = conflicts.count { (key, positions) ->
-                    remaining[key] == positions &&
-                        refetched.containsAll(positions) &&
-                        keyedCache.confirm(positions.first { it in keyedCache.hiddenPositions }) != null
-                }
-                if (confirmed > 0) dataFlow.value = cache.publish(dataFlow.value.size, onGet)
-                holesLeft.value = keyedCache.hiddenPositions.isNotEmpty()
-            }
+        if (cache is KeyedAccumulator) {
+            resolveConflicts(cache, permits, dataFlow, mutex, onGet, readData, gridCell = ::gridCellAt)
         }
         loadStateFlow.value = LoadState.Success // Signal loading completed
     }
@@ -599,6 +565,52 @@ private suspend fun <T> fetchChunks(
 }
 
 /**
+ * The key-conflict round of a keyed pass: every [gridCell] holding a position of a conflicting key
+ * is refetched once, then each of those conflicts that the refetch rewrote and that still sits on
+ * the same positions is confirmed.
+ */
+private suspend fun <T> resolveConflicts(
+    cache: KeyedAccumulator<T>,
+    permits: Semaphore,
+    dataFlow: MutableStateFlow<PagingMap<T>>,
+    mutex: Mutex,
+    onGet: (Int) -> Unit,
+    readData: (pos: Int, loadSize: Int) -> Flow<DataPortion<T>>,
+    gridCell: (position: Int, limit: Int) -> IntRange,
+) {
+    val keyed = cache.keyed
+    val (conflicts, conflictCells) = mutex.withLock {
+        currentCoroutineContext().ensureActive()
+        // A pass that fetched nothing has not pruned yet: no refetch for what it would drop.
+        dataFlow.value = cache.pruned(dataFlow.value.size, onGet)
+        val conflicts = keyed.cache.unconfirmedConflicts()
+        val limit = dataFlow.value.size - 1
+        conflicts to conflicts.values.flatten()
+            .map { gridCell(it, limit) }
+            .filterNot { it.isEmpty() }
+            .distinct()
+    }
+    val refetched = HashSet<Int>()
+    fetchChunks(conflictCells, permits, mutex, readData) { portion ->
+        refetched += portion.values.keys
+        dataFlow.value = cache.next(dataFlow.value, portion, onGet)
+    }
+    mutex.withLock {
+        currentCoroutineContext().ensureActive()
+        // Only conflicts whose every position was just rewritten; ones that arose in this
+        // round, or whose refetch wrote nothing there, stay hidden for the next pass.
+        val remaining = keyed.cache.unconfirmedConflicts()
+        val confirmed = conflicts.count { (key, positions) ->
+            remaining[key] == positions &&
+                refetched.containsAll(positions) &&
+                keyed.cache.confirm(positions.first(keyed.cache::isHidden)) != null
+        }
+        if (confirmed > 0) dataFlow.value = cache.publish(dataFlow.value.size, onGet)
+        keyed.roundEndedLocked(tried = conflicts)
+    }
+}
+
+/**
  * Written per row per frame from whatever thread reads the map, read from the loading coroutine.
  *
  * A captured local `var` would race across the two; a `MutableStateFlow` would put back on the
@@ -610,30 +622,53 @@ private class LastAccessedKey {
 }
 
 /**
+ * The `itemKey` side of one [Pager.flow] collection. Everything but [holesLeft] is touched only
+ * under the pager's mutex.
+ */
+private class KeyedState<T>(val cache: KeyedCache<T>) {
+    // Conflicts the last round refetched; left as they were, another refetch would not change them.
+    private var triedConflicts: Map<Any, Set<Int>> = emptyMap()
+
+    // Set when a round leaves conflicts it has not tried: reading one of their hidden positions must
+    // reload its page even when the consumer settles back on the position it last requested.
+    @Volatile
+    var holesLeft: Boolean = false
+
+    fun untriedConflictsLocked(): Map<Any, Set<Int>> =
+        cache.unconfirmedConflicts().filter { (key, positions) -> triedConflicts[key] != positions }
+
+    fun roundEndedLocked(tried: Map<Any, Set<Int>>) {
+        triedConflicts = tried
+        holesLeft = untriedConflictsLocked().isNotEmpty()
+    }
+
+    fun clearLocked() {
+        cache.clear()
+        triedConflicts = emptyMap()
+        holesLeft = false
+    }
+}
+
+/**
  * Builds the successive cache snapshots of one [Pager.loadPortion] call.
- *
- * [cacheRange] is fixed for the duration of a call, so once the values have been pruned to it every
- * later merge only has to write its own delta. A portion that changes the total size replaces the
- * map wholesale, which breaks that invariant, so the next merge prunes again.
  *
  * The chunks of a call run concurrently and share one accumulator, so [next] is only ever called
  * under the pager's mutex.
- *
- * With [keyed], writes go through the shared key cache instead of [values]. It is pruned on the
- * first write rather than up front, so a pass that never writes leaves it in step with the
- * published map.
  */
-private class CacheAccumulator<T>(
-    private var values: PersistentMap<Int, T>,
-    private val cacheRange: IntRange,
-    private val keyed: KeyedCache<T>? = null,
-) {
-    private var pruned: Boolean = keyed == null
+private sealed interface CacheAccumulator<T> {
+    fun next(current: PagingMap<T>, portion: DataPortion<T>, onGet: (Int) -> Unit): PagingMap<T>
+}
 
-    fun next(current: PagingMap<T>, portion: DataPortion<T>, onGet: (Int) -> Unit): PagingMap<T> =
-        if (keyed != null) nextKeyed(keyed, current, portion, onGet) else nextUnkeyed(current, portion, onGet)
+/**
+ * [cacheRange] is fixed for the duration of a call, so once the values have been pruned to it every
+ * later merge only has to write its own delta. A portion that changes the total size replaces the
+ * map wholesale, which breaks that invariant, so the next merge prunes again.
+ */
+private class UnkeyedAccumulator<T>(private var values: PersistentMap<Int, T>, private val cacheRange: IntRange) :
+    CacheAccumulator<T> {
+    private var pruned: Boolean = true
 
-    private fun nextUnkeyed(current: PagingMap<T>, portion: DataPortion<T>, onGet: (Int) -> Unit): PagingMap<T> {
+    override fun next(current: PagingMap<T>, portion: DataPortion<T>, onGet: (Int) -> Unit): PagingMap<T> {
         if (current.size != portion.totalSize) {
             values = portion.values
             pruned = false
@@ -648,24 +683,22 @@ private class CacheAccumulator<T>(
         pruned = true
         return PagingMap(size = portion.totalSize, values = values, onGet = onGet)
     }
+}
 
-    /** The key cache as it stands; only for an accumulator built with [keyed]. */
-    fun publish(size: Int, onGet: (Int) -> Unit): PagingMap<T> {
-        val keyed = checkNotNull(keyed)
-        return PagingMap(size = size, values = keyed.visible, onGet = onGet, keys = keyed.keys)
-    }
+/**
+ * Writes through the shared key cache, mirroring [UnkeyedAccumulator]. The cache is pruned on the
+ * first write rather than up front, so a pass that never writes leaves it in step with the published
+ * map.
+ */
+private class KeyedAccumulator<T>(val keyed: KeyedState<T>, private val cacheRange: IntRange) : CacheAccumulator<T> {
+    private var pruned: Boolean = false
 
-    private fun nextKeyed(
-        keyed: KeyedCache<T>,
-        current: PagingMap<T>,
-        portion: DataPortion<T>,
-        onGet: (Int) -> Unit,
-    ): PagingMap<T> {
+    override fun next(current: PagingMap<T>, portion: DataPortion<T>, onGet: (Int) -> Unit): PagingMap<T> {
         // A new total shifts positions, so the old key index is meaningless; the portion is kept
         // whole, as in the unkeyed path.
         val sizeChanged = current.size != portion.totalSize
-        if (sizeChanged) keyed.clear()
-        keyed.write(
+        if (sizeChanged) keyed.clearLocked()
+        keyed.cache.write(
             incoming = portion.values,
             cacheRange = if (sizeChanged) Int.MIN_VALUE..Int.MAX_VALUE else cacheRange,
             pruneExisting = !sizeChanged && !pruned,
@@ -674,6 +707,17 @@ private class CacheAccumulator<T>(
         pruned = !sizeChanged
         return publish(portion.totalSize, onGet)
     }
+
+    /** The key cache pruned to the pass's window, as [next] would leave it. */
+    fun pruned(size: Int, onGet: (Int) -> Unit): PagingMap<T> {
+        if (!pruned) keyed.cache.prune(cacheRange)
+        pruned = true
+        return publish(size, onGet)
+    }
+
+    /** The key cache as it stands. */
+    fun publish(size: Int, onGet: (Int) -> Unit): PagingMap<T> =
+        PagingMap(size = size, values = keyed.cache.visible, onGet = onGet, keys = keyed.cache.keys)
 }
 
 // Extension functions for range manipulation

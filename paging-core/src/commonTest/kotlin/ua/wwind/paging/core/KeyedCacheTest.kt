@@ -128,6 +128,28 @@ class KeyedCacheTest {
     }
 
     @Test
+    fun rewriteHiddenAndJoinInOnePortion_newPositionWins_inAnyOrder() {
+        for (portion in listOf(arrayOf(20 to "u", 30 to "u"), arrayOf(30 to "u", 20 to "u"))) {
+            val cache = conflictOn20()
+
+            val result = cache.put(*portion, confirmOnRewrite = true)
+
+            result.confirmed shouldBe emptyList()
+            cache.keys[30] shouldBe "u"
+            cache.hiddenPositions shouldBe setOf(19, 20)
+        }
+    }
+
+    @Test
+    fun hiddenPositions_isSnapshot() {
+        val cache = conflictOn20()
+
+        for (position in cache.hiddenPositions) cache.confirm(position)
+
+        cache.hiddenPositions shouldBe emptySet()
+    }
+
+    @Test
     fun releasedOwner_passesToMostRecentlyWritten() {
         val cache = cache()
         cache.put(10 to "u")

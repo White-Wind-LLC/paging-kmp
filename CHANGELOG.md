@@ -13,9 +13,24 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Breaking:** `PagingMap` is no longer a `data class`, so item keys cannot be set from outside and stay unique in
+  every map a consumer sees (#54). Its public constructor `(size, values, onGet)` creates a map with fallback keys only;
+  `copy(size, values, onGet)` keeps a position's key only while that position holds an equal value. `equals`,
+  `hashCode` and `toString` stay; the `componentN` functions (destructuring) are gone.
 - Binary compatibility: libraries compiled against 2.3.x that call the `Pager`, `StreamingPager` or
   `PagingMediatorConfig` constructors, or `PagingMap.copy` / `PagingMediatorConfig.copy`, must be recompiled against
-  2.4.0. Source compatibility is kept.
+  2.4.0.
+
+### Fixed
+
+- Item keys, follow-ups to #52 (#54):
+  - `Pager` no longer reloads a page every time a still viewport reads a hidden position that a refetch has already
+    failed to fill. `refresh()` and a failed pass reset that state.
+  - `Pager` resolves conflicts left by a superseded pass even when the next pass has nothing to fetch.
+  - `StreamingPager` no longer confirms a duplicate when the hidden position's window closed and reopened within the
+    grace period: the reopened window must emit first.
+  - A portion that both adds a position for a key and rewrites a hidden position of that key no longer gives a result
+    that depends on the order of the map.
 
 ## [2.3.4] - 2026-10-07
 

@@ -86,7 +86,9 @@ public data class StreamingPagerConfig(
  * have not all re-emitted yet) resolves as soon as the stale window catches up. A real duplicate is
  * confirmed when the hidden position's window re-emits the same key there, or stays live but silent
  * for a second; all its positions are then shown, extra ones under fallback keys, and a warning is
- * logged. With `null`, every key is a fallback and nothing is hidden.
+ * logged. A [readPortion] that replays its last value to a new subscriber (for example
+ * `shareIn(replay = 1)`) hands a reopened window its stale portion, which can confirm a transient
+ * duplicate until fresh data arrives. With `null`, every key is a fallback and nothing is hidden.
  * @property readPortion Provider of a flow for a portion starting at `pos` of length `loadSize`,
  * returning only the map of values keyed by absolute index.
  */
@@ -104,6 +106,9 @@ public class StreamingPager<T>(
         readTotal: () -> Flow<Int>,
         readPortion: (pos: Int, loadSize: Int) -> Flow<Map<Int, T>>,
     ) : this(config, readTotal, null, readPortion)
+
+    /** Test hook: receives the state of each collection, whose `data` sees every published map. */
+    internal var onStateCreated: ((StreamingPagerState<T>) -> Unit)? = null
 
     /**
      * Public flow of paging state for the UI. Jobs are bound to the collection lifecycle.
@@ -126,6 +131,7 @@ public class StreamingPager<T>(
             logger = logger,
             itemKey = itemKey,
         )
+        onStateCreated?.invoke(state)
 
         val retryRequests: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 1)
 

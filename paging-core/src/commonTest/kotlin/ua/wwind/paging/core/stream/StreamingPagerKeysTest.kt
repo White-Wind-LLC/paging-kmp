@@ -10,12 +10,12 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import ua.wwind.paging.core.ExperimentalStreamingPagerApi
-import ua.wwind.paging.core.PagingData
 import ua.wwind.paging.core.PagingMap
 import kotlin.test.Test
 
@@ -37,7 +37,6 @@ class StreamingPagerKeysTest {
             portionFlows[start to size]?.emit(values)
         }
 
-        @OptIn(ExperimentalCoroutinesApi::class)
         fun resetReplay(start: Int, size: Int) {
             portionFlows[start to size]?.resetReplayCache()
         }
@@ -66,25 +65,31 @@ class StreamingPagerKeysTest {
     private fun rows(start: Int, ids: String): Map<Int, Row> =
         ids.mapIndexed { i, c -> (start + i) to (c.toString() to start + i) }.toMap()
 
-    private class Collected(val snapshots: MutableList<PagingData<Row>>, val job: Job) {
-        val latest: PagingData<Row> get() = snapshots.last()
+    /** Every map the pager published, not only the ones its conflated flow lets through. */
+    private class Collected(val snapshots: MutableList<PagingMap<Row>>, val job: Job) {
+        val latest: PagingMap<Row> get() = snapshots.last()
     }
 
     private fun TestScope.collect(pager: StreamingPager<Row>): Collected {
-        val snapshots = mutableListOf<PagingData<Row>>()
-        val job = launch { pager.flow.collect { snapshots += it } }
+        val snapshots = mutableListOf<PagingMap<Row>>()
+        pager.onStateCreated = { state ->
+            // Unconfined: resumed inline by every write, so no map is conflated away.
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                state.data.collect { snapshots += it }
+            }
+        }
+        val job = launch { pager.flow.collect {} }
         return Collected(snapshots, job)
     }
 
-    private fun assertKeysUnique(snapshot: PagingData<Row>) {
-        val data = snapshot.data
+    private fun assertKeysUnique(data: PagingMap<Row>) {
         val keys = (0 until data.size).map { data.keyAt(it) }
         keys.toSet().size shouldBe keys.size
     }
 
-    private fun assertUnique(snapshot: PagingData<Row>) {
-        assertKeysUnique(snapshot)
-        val ids = snapshot.data.values.values.map { it.first }
+    private fun assertUnique(data: PagingMap<Row>) {
+        assertKeysUnique(data)
+        val ids = data.values.values.map { it.first }
         ids.toSet().size shouldBe ids.size
     }
 
@@ -97,7 +102,7 @@ class StreamingPagerKeysTest {
     }
 
     private fun Collected.assertShows(ids: String) {
-        val data = latest.data
+        val data = latest
         ids.forEachIndexed { i, c ->
             data.values[i].shouldNotBeNull().first shouldBe c.toString()
             data.keyAt(i) shouldBe c.toString()
@@ -116,9 +121,9 @@ class StreamingPagerKeysTest {
 
         src.emitPortion(0, 5, rows(0, "bcdef"))
         runCurrent()
-        c.latest.data.keyAt(4) shouldBe "f"
-        c.latest.data.values shouldNotContainKey 5
-        c.latest.data.keyAt(5) shouldBe PagingMap.FALLBACK_KEY_PREFIX + 5
+        c.latest.keyAt(4) shouldBe "f"
+        c.latest.values shouldNotContainKey 5
+        c.latest.keyAt(5) shouldBe PagingMap.FALLBACK_KEY_PREFIX + 5
 
         src.emitPortion(5, 5, rows(5, "ghijk"))
         runCurrent()
@@ -139,8 +144,8 @@ class StreamingPagerKeysTest {
 
         src.emitPortion(5, 5, rows(5, "efghi"))
         runCurrent()
-        c.latest.data.keyAt(5) shouldBe "e"
-        c.latest.data.values shouldNotContainKey 4
+        c.latest.keyAt(5) shouldBe "e"
+        c.latest.values shouldNotContainKey 4
 
         src.emitPortion(0, 5, rows(0, "zabcd"))
         runCurrent()
@@ -161,8 +166,8 @@ class StreamingPagerKeysTest {
 
         src.emitPortion(5, 5, rows(5, "ghcij"))
         runCurrent()
-        c.latest.data.keyAt(7) shouldBe "c"
-        c.latest.data.values shouldNotContainKey 2
+        c.latest.keyAt(7) shouldBe "c"
+        c.latest.values shouldNotContainKey 2
 
         src.emitPortion(0, 5, rows(0, "abdef"))
         runCurrent()
@@ -182,26 +187,60 @@ class StreamingPagerKeysTest {
         runCurrent()
         src.emitPortion(0, 5, rows(0, "bcdef"))
         runCurrent()
-        c.latest.data.values shouldNotContainKey 5
+        c.latest.values shouldNotContainKey 5
 
-        c.latest.data[50]
+        c.latest[50]
         runCurrent()
         src.subscribers(5, 5) shouldBe 0
         // The grace period passes while the window is closed: the position stays hidden.
         advanceUntilIdle()
-        c.latest.data.values shouldNotContainKey 5
-        c.latest.data.keyAt(5) shouldBe PagingMap.FALLBACK_KEY_PREFIX + 5
+        c.latest.values shouldNotContainKey 5
+        c.latest.keyAt(5) shouldBe PagingMap.FALLBACK_KEY_PREFIX + 5
 
         src.resetReplay(5, 5)
-        c.latest.data[5]
+        c.latest[5]
         runCurrent()
         src.subscribers(5, 5) shouldBe 1
-        c.latest.data.values shouldNotContainKey 5
+        c.latest.values shouldNotContainKey 5
 
         src.emitPortion(5, 5, rows(5, "ghijk"))
         runCurrent()
-        c.latest.data.keyAt(5) shouldBe "g"
-        c.latest.data.keyAt(4) shouldBe "f"
+        c.latest.keyAt(5) shouldBe "g"
+        c.latest.keyAt(4) shouldBe "f"
+        c.assertAllUnique()
+        c.job.cancel()
+    }
+
+    @Test
+    fun windowReopenedWithinGrace_notConfirmedBeforeItEmits() = runTest {
+        val src = TestSource<Row>()
+        src.totalFlow.value = 100
+        val c = collect(pager(src))
+        advanceUntilIdle()
+        src.emitPortion(0, 5, rows(0, "abcde"))
+        src.emitPortion(5, 5, rows(5, "fghij"))
+        runCurrent()
+        src.emitPortion(0, 5, rows(0, "bcdef"))
+        runCurrent()
+        c.latest.values shouldNotContainKey 5
+
+        // The window holding the hidden position closes and reopens well within the grace period.
+        c.latest[50]
+        runCurrent()
+        src.subscribers(5, 5) shouldBe 0
+        src.resetReplay(5, 5)
+        c.latest[5]
+        runCurrent()
+        src.subscribers(5, 5) shouldBe 1
+
+        // The reopened window has not emitted yet, so the stale "f" stays hidden.
+        advanceTimeBy(CONFLICT_GRACE_MS)
+        runCurrent()
+        c.latest.values shouldNotContainKey 5
+
+        src.emitPortion(5, 5, rows(5, "ghijk"))
+        runCurrent()
+        c.assertShows("bcdefghijk")
         c.assertAllUnique()
         c.job.cancel()
     }
@@ -215,18 +254,18 @@ class StreamingPagerKeysTest {
         src.emitPortion(0, 5, rows(0, "abcdu"))
         src.emitPortion(5, 5, rows(5, "ufghi"))
         runCurrent()
-        c.latest.data.values shouldNotContainKey 4
+        c.latest.values shouldNotContainKey 4
 
         advanceTimeBy(CONFLICT_GRACE_MS - 1)
         runCurrent()
-        c.latest.data.values shouldNotContainKey 4
+        c.latest.values shouldNotContainKey 4
 
         val beforeConfirm = c.snapshots.size
         advanceTimeBy(1)
         runCurrent()
-        c.latest.data.values[4].shouldNotBeNull().first shouldBe "u"
-        c.latest.data.values[5].shouldNotBeNull().first shouldBe "u"
-        c.latest.data.keyAt(5) shouldBe "u"
+        c.latest.values[4].shouldNotBeNull().first shouldBe "u"
+        c.latest.values[5].shouldNotBeNull().first shouldBe "u"
+        c.latest.keyAt(5) shouldBe "u"
         c.assertUniqueUntil(beforeConfirm)
         c.job.cancel()
     }
@@ -240,13 +279,13 @@ class StreamingPagerKeysTest {
         src.emitPortion(0, 5, rows(0, "abcdu"))
         src.emitPortion(5, 5, rows(5, "ufghi"))
         runCurrent()
-        c.latest.data.values shouldNotContainKey 4
+        c.latest.values shouldNotContainKey 4
 
         val beforeConfirm = c.snapshots.size
         src.emitPortion(0, 5, rows(0, "abcdu"))
         runCurrent()
-        c.latest.data.values[4].shouldNotBeNull().first shouldBe "u"
-        c.latest.data.values[5].shouldNotBeNull().first shouldBe "u"
+        c.latest.values[4].shouldNotBeNull().first shouldBe "u"
+        c.latest.values[5].shouldNotBeNull().first shouldBe "u"
         c.assertUniqueUntil(beforeConfirm)
         c.job.cancel()
     }
@@ -260,18 +299,17 @@ class StreamingPagerKeysTest {
         src.emitPortion(5, 5, rows(5, "fghic"))
         src.emitPortion(0, 5, rows(0, "abcde"))
         runCurrent()
-        c.latest.data.values shouldNotContainKey 9
+        c.latest.values shouldNotContainKey 9
 
         src.totalFlow.value = 8
         runCurrent()
-        c.latest.data.size shouldBe 8
-        c.latest.data.values.keys.all { it < 8 } shouldBe true
-        c.latest.data.keyAt(2) shouldBe "c"
+        c.latest.size shouldBe 8
+        c.latest.values.keys shouldBe (0..7).toSet()
+        c.assertShows("abcdefgh")
 
         src.emitPortion(0, 5, rows(0, "abxcd"))
         runCurrent()
-        c.latest.data.keyAt(3) shouldBe "c"
-        c.latest.data.values[3].shouldNotBeNull().first shouldBe "c"
+        c.assertShows("abxcdfgh")
         c.assertAllUnique()
         c.job.cancel()
     }
@@ -286,8 +324,10 @@ class StreamingPagerKeysTest {
         src.emitPortion(0, 5, (0..4).associateWith { "r$it" to 9 - it })
         src.emitPortion(5, 5, (5..9).associateWith { "r$it" to 9 - it })
         runCurrent()
-        c.latest.data.keyAt(0) shouldBe 9
-        c.latest.data.keyAt(15) shouldBe PagingMap.FALLBACK_KEY_PREFIX + 15
+        // Nothing hidden: int key 5 does not clash with position 5, nor with its fallback.
+        c.latest.values.keys shouldBe (0..9).toSet()
+        (0 until 20).map { c.latest.keyAt(it) } shouldBe
+            (9 downTo 0).toList() + (10 until 20).map { PagingMap.FALLBACK_KEY_PREFIX + it }
         c.assertAllUnique()
         c.job.cancel()
     }
@@ -303,7 +343,7 @@ class StreamingPagerKeysTest {
         advanceUntilIdle()
         val before = src.subscribedRanges()
 
-        val data = c.latest.data
+        val data = c.latest
         for (i in 0..249) data.keyAt(i)
         advanceUntilIdle()
         src.subscribedRanges() shouldBe before
@@ -319,7 +359,7 @@ class StreamingPagerKeysTest {
         src.emitPortion(0, 5, rows(0, "abcde"))
         src.emitPortion(5, 5, rows(5, "abcde"))
         advanceUntilIdle()
-        val data = c.latest.data
+        val data = c.latest
         data.values.size shouldBe 10
         (0 until data.size).forEach { data.keyAt(it) shouldBe PagingMap.FALLBACK_KEY_PREFIX + it }
         c.job.cancel()
