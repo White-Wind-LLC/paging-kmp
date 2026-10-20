@@ -26,14 +26,27 @@ import kotlinx.collections.immutable.toPersistentMap
  * @param size Total number of items in the complete dataset
  * @param values Map of loaded items (position -> item)
  * @param onGet Callback invoked when an item is accessed (triggers loading)
+ * @param keys Keys of the positions that won their item key; positions hidden by a key
+ * conflict are absent from [values] and have no entry here
  */
 public data class PagingMap<V>(
     val size: Int,
     val values: PersistentMap<Int, V>,
     private val onGet: (key: Int) -> Unit,
+    private val keys: PersistentMap<Int, Any> = persistentMapOf(),
 ) {
 
+    /** Source-compatible constructor that allows a trailing `onGet` lambda; all keys are fallbacks. */
+    public constructor(
+        size: Int,
+        values: PersistentMap<Int, V>,
+        onGet: (key: Int) -> Unit,
+    ) : this(size, values, onGet, persistentMapOf())
+
     public companion object {
+        /** Prefix of the fallback key `"ua.wwind.paging#" + index`; cannot equal a user key of another type. */
+        public const val FALLBACK_KEY_PREFIX: String = "ua.wwind.paging#"
+
         /**
          * Creates an empty PagingMap with no data and no loading capability
          * Used as initial state or for testing
@@ -57,7 +70,18 @@ public data class PagingMap<V>(
             transform(value)
         }.toPersistentMap(),
         onGet = onGet,
+        keys = keys,
     )
+
+    /**
+     * Stable key of the item at [index] for `LazyColumn` or `rowKey`.
+     *
+     * Never calls `onGet`, so it does not trigger loading. Unique within this map only
+     * (two pagers in one list are not supported). Unloaded or hidden positions, and every
+     * position when no `itemKey` is set, get the fallback `FALLBACK_KEY_PREFIX + index`; so do
+     * the extra rows of a key confirmed to appear several times in the source.
+     */
+    public fun keyAt(index: Int): Any = keys[index] ?: (FALLBACK_KEY_PREFIX + index)
 
     /**
      * Access operator that returns the state of an item at the given position.

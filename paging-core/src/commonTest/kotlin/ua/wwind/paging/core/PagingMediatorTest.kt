@@ -335,4 +335,48 @@ class PagingMediatorTest {
             PagingMediatorConfig<Item>(loadSize = 20, prefetchSize = 100, cacheSize = 100)
         }
     }
+
+    @Test
+    fun itemKey_staleLocalThenRemote_uniqueKeys() = runTest {
+        // Local 6..9 is stale (ids shifted by two): id 4 sits at 4 (remote) and at 6 (local) until 5..9 is refetched
+        val local = FakeLocal(
+            initialTotalSize = 10,
+            initialValues = (6..9).associateWith { Item(it - 2) },
+            query = Unit,
+        )
+        val remote = FakeRemote<Item, Unit> { start, size, _ ->
+            delay(100)
+            val last = (start + size - 1).coerceAtMost(9)
+            DataPortion(totalSize = 10, values = (start..last).associateWith { Item(it) }.toPersistentMap())
+        }
+        val config = PagingMediatorConfig<Item>(
+            loadSize = 5,
+            prefetchSize = 5,
+            cacheSize = 20,
+            fetchFullRangeOnMiss = true,
+            emitOutdatedRecords = true,
+            itemKey = { it.id },
+        )
+        val (mediator, advanceFully) = buildMediator(local, remote, config)
+
+        val snapshots = mutableListOf<PagingData<Item>>()
+        val job: Job = launch { mediator.flow(Unit).collect { snapshots += it } }
+        testScheduler.runCurrent()
+        snapshots.last().data[7]
+        advanceFully(1_000)
+
+        snapshots.forEach { snapshot ->
+            val data = snapshot.data
+            val keys = (0 until data.size).map { data.keyAt(it) }
+            keys.toSet().size shouldBe keys.size
+            val ids = data.values.values.map { it.id }
+            ids.toSet().size shouldBe ids.size
+        }
+        val data = snapshots.last().data
+        (5..9).forEach {
+            data.values[it] shouldBe Item(it)
+            data.keyAt(it) shouldBe it
+        }
+        job.cancel()
+    }
 }

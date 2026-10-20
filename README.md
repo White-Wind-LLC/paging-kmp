@@ -243,6 +243,35 @@ of the edge of the loaded window still count, which is what keeps the window mov
 that invalidates the cache — a `refresh()`, a failed load, a hole left by a short portion — makes every read count
 again.
 
+### Keying lists by item id
+
+Without a key, a `LazyColumn` identifies rows by position, so a row that moves (an insert, a delete, a streamed update)
+loses its state and animation. Pass `itemKey` to `Pager`, `StreamingPager` or `PagingMediatorConfig` and key the list
+by it:
+
+```kotlin
+val pager = Pager<User>(itemKey = { it.id }) { pos, loadSize -> api.users(pos, loadSize) }
+
+val data = pagingData.data
+LazyColumn {
+    items(count = data.size, key = { data.keyAt(it) }) { index ->
+        // ...
+    }
+}
+```
+
+- Compute the key with `data.keyAt(index)`, never from `data[index]`: reading an item drives preloading, which
+  keys must not do.
+- Rows that are not loaded yet get a stable fallback key (`PagingMap.FALLBACK_KEY_PREFIX` + index).
+- The key type must be storable in a `Bundle` (`Uuid`, `String` or a primitive; not a boxed value class), as
+  `LazyColumn` saves it. A `String` key must not start with `PagingMap.FALLBACK_KEY_PREFIX`.
+- Use one pager per list: keys are unique within a pager, not across pagers.
+- A key that briefly appears twice while pages shift (a transient duplicate) is hidden: the copy from older data shows
+  as not yet loaded until the data settles. A key that really appears twice in the source is shown as two rows, each
+  with its own unique key.
+- A `readPortion` source that replays its last value to a new subscriber (for example `shareIn(replay = 1)`) can make a
+  stale duplicate count as real when a window reopens, until fresh data arrives.
+
 ---
 
 ## 📡 Real-time Pagination over SSE (StreamingPager)
