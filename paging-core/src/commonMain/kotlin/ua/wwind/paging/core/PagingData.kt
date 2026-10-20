@@ -20,10 +20,16 @@ package ua.wwind.paging.core
  *
  * @param T The type of items in the paged data
  * @param data The PagingMap containing loaded items and access logic
- * @param loadState Current global loading state (Loading, Success, or Error)
+ * @param loadState Loading state of the accessed position (Loading, Success, or Error)
+ * @param prefetchState Background fill of the rest of the window around the accessed position
  * @param retry Function to retry loading for a specific position
  */
-public data class PagingData<T>(val data: PagingMap<T>, val loadState: LoadState, val retry: (key: Int) -> Unit) {
+public data class PagingData<T>(
+    val data: PagingMap<T>,
+    val loadState: LoadState,
+    val prefetchState: LoadState,
+    val retry: (key: Int) -> Unit,
+) {
     public companion object {
         /**
          * Creates an empty PagingData instance with no items and success state.
@@ -38,7 +44,7 @@ public data class PagingData<T>(val data: PagingMap<T>, val loadState: LoadState
          *
          * @return Empty PagingData instance
          */
-        public fun <T> empty(): PagingData<T> = PagingData(PagingMap.empty(), LoadState.Success) {}
+        public fun <T> empty(): PagingData<T> = PagingData(PagingMap.empty(), LoadState.Success, LoadState.Success) {}
     }
 
     /**
@@ -48,6 +54,10 @@ public data class PagingData<T>(val data: PagingMap<T>, val loadState: LoadState
      * Applies transformation only to currently loaded items, not future ones.
      * Item keys ([PagingMap.keyAt]) are preserved.
      */
-    public fun <R> map(transform: (T) -> R): PagingData<R> =
-        PagingData(data = data.mapValues(transform), loadState = loadState, retry = retry)
+    public fun <R> map(transform: (T) -> R): PagingData<R> = PagingData(
+        data = data.mapValues(transform),
+        loadState = loadState,
+        prefetchState = prefetchState,
+        retry = retry,
+    )
 }

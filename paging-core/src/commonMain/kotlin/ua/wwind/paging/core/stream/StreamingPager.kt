@@ -146,7 +146,7 @@ public class StreamingPager<T>(
 
         val emitter = launch {
             combine(state.data, state.loadStateFlow) { data: PagingMap<T>, loadState ->
-                PagingData(data, loadState) { key ->
+                PagingData(data, loadState, LoadState.Success) { key ->
                     // Not through `onGet`: a retry has to reach the planner even from inside the
                     // settled range.
                     retryKeys.tryEmit(key)

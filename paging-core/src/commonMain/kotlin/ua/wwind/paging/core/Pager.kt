@@ -179,7 +179,7 @@ public class Pager<T>(
         // Combine and emit data
         val emitter = launch {
             combine(data, loadState.onStart { emit(LoadState.Loading) }) { data, loadState ->
-                PagingData(data, loadState, ::onRetry)
+                PagingData(data, loadState, LoadState.Success, ::onRetry)
             }.collect { paging -> send(paging) }
         }
 

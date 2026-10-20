@@ -91,7 +91,8 @@ class PagingMapKeysTest {
     fun pagingDataMap_keepsKeys() {
         val map = PagingMap(2, persistentMapOf(0 to 1), {}, persistentMapOf(0 to "a"))
 
-        PagingData(map, LoadState.Success) {}.map { it * 10 }.data.keyAt(0) shouldBe "a"
+        PagingData(map, LoadState.Success, prefetchState = LoadState.Success) {}.map { it * 10 }.data.keyAt(0) shouldBe
+            "a"
     }
 
     @Test
