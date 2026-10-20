@@ -43,15 +43,14 @@ public sealed interface LoadState {
     public data class Error(val throwable: Throwable, val key: Int) : LoadState
 
     /**
-     * Indicates that the most recent paging operation completed successfully.
+     * Indicates that nothing is pending or failed for the part this state describes.
      *
-     * This state means:
-     * - All requested data has been loaded without errors
-     * - The cache has been updated with new items
-     * - The system is ready for the next loading operation
+     * As `loadState` it means the item at the accessed position is cached, or no fetch
+     * covering it is in flight or has failed; the rest of the window may still be
+     * loading or have failed, which `prefetchState` reports. As `prefetchState` it means
+     * the rest of the window has been filled without errors.
      *
-     * Note: Success doesn't mean ALL data is loaded, just that the most
-     * recent loading request completed successfully. There may still be
+     * Note: Success doesn't mean ALL data is loaded. There may still be
      * unloaded items in other parts of the dataset.
      */
     public data object Success : LoadState

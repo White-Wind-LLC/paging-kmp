@@ -209,9 +209,7 @@ fun UserList() {
 }
 ```
 
-`loadState` is `Loading` only while the item at the accessed position is missing and being fetched, and `Error` when
-that fetch fails; scrolling over cached data never changes it. The rest of the preload window is reported separately in
-`pagingData.prefetchState`, and its failures do not affect `loadState`.
+`loadState` and `prefetchState` mean the same as in the [Quick Start](#quick-start).
 
 ### Compose stability
 
@@ -446,7 +444,7 @@ Transform items while preserving loading state and retry logic:
 
 ```kotlin
 val mapped: PagingData<String> = pagingData.map { user -> "${user.id}: ${user.name}" }
-// Only currently-loaded items are transformed; loadState and retry are preserved.
+// Only currently-loaded items are transformed; loadState, prefetchState and retry are preserved.
 ```
 
 ## Supported Platforms
