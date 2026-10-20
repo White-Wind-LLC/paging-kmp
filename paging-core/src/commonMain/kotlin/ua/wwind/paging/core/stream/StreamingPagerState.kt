@@ -107,13 +107,31 @@ internal class StreamingPagerState<T>(
     val anchorKey: MutableStateFlow<Int> = MutableStateFlow(0)
 
     /**
-     * State of the accessed position: the range holding [anchorKey], where `Loading` over an
-     * already cached item counts as `Success`.
+     * Outcome of `readTotal()`: `Loading` until it emits (again, after a failure), `Error` once it fails.
+     *
+     * Kept apart from [rangeLoadStates] so that neither overwrites the other: a retry must not mark a
+     * live but quiet stream `Loading` again, and a range settling must not hide the failure (#59).
      */
-    val loadStateFlow: Flow<LoadState> = combine(rangeLoadStates, data, anchorKey) { stateMap, map, key ->
-        if (stateMap == null) return@combine LoadState.Loading
+    val totalState: MutableStateFlow<LoadState> = MutableStateFlow(LoadState.Loading)
+
+    /**
+     * State of the accessed position: a `readTotal()` failure, else the range holding [anchorKey],
+     * where `Loading` over an already cached item counts as `Success`. A known empty list is `Success`.
+     */
+    val loadStateFlow: Flow<LoadState> = combine(
+        totalState,
+        rangeLoadStates,
+        data,
+        anchorKey,
+    ) { total, stateMap, map, key ->
         // Several entries can hold the key when an errored range outlives a replan onto another grid.
-        when (val anchor = stateMap.filterKeys { key in it }.values.aggregate(key)) {
+        val ranges = stateMap?.filterKeys { key in it }?.values?.aggregate(key)
+        val anchor = when (total) {
+            is LoadState.Error -> return@combine LoadState.Error(total.throwable, key)
+            LoadState.Loading -> ranges as? LoadState.Error ?: LoadState.Loading
+            LoadState.Success -> if (map.size == 0) return@combine LoadState.Success else ranges ?: LoadState.Loading
+        }
+        when (anchor) {
             LoadState.Loading -> if (map.values.containsKey(key)) LoadState.Success else LoadState.Loading
             else -> anchor
         }
@@ -260,23 +278,6 @@ internal class StreamingPagerState<T>(
         // it. An emptied list has nothing left to cover, so its streams stay closed.
         if (newTotal > 0 && (toClose.isNotEmpty() || keyFellOffTheEnd)) {
             adjustStreamsForKeyLocked(lastAccessedKey.coerceIn(0, lastValidKey), scope)
-        }
-    }
-
-    /**
-     * Puts every known range into the state [stateFor] returns for it.
-     *
-     * Used to propagate a global `readTotal()` outcome - an error, or the retry that follows it -
-     * to the UI without tearing the flow down. When nothing is known yet the first page stands in,
-     * so that an initial failure is still visible.
-     */
-    suspend fun markKnownRanges(stateFor: (IntRange) -> LoadState) = mutex.withLock {
-        val ranges = (rangeLoadStates.value.orEmpty().keys + activeStreams.keys).toSet()
-        val knownRanges = ranges.ifEmpty {
-            setOf(0..<config.loadSize)
-        }
-        rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
-            current.orEmpty() + knownRanges.associateWith(stateFor)
         }
     }
 
