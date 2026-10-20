@@ -145,8 +145,10 @@ row is visible, which is the honest picture of a data error.
 
 A conflict is confirmed when the losing position's own source has had its chance to correct it:
 
-- `Pager`: the hidden position's page was refetched and still places the same key there. That
-  refetch must not count as a new win that hides the other copy - no reload loop.
+- `Pager`: the pages of every position holding the key (winner and losers) were refetched once and
+  the key is still on more than one position. Refetching only the loser's page is not enough: when
+  the winner is the stale side, that would confirm a transient duplicate. The refetch happens once
+  per conflict - no reload loop.
 - `StreamingPager`: the losing position's window delivered a portion that still places the key
   there; or the window is live but stays silent for a bounded grace period after the conflict
   appeared (*my call; the builder picks the value, on the order of `keyDebounceMs`*); or the window
