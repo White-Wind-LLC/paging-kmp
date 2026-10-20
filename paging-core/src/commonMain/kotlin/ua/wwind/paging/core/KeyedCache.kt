@@ -37,8 +37,10 @@ internal class KeyedCache<T>(private val itemKey: (T) -> Any) {
     private val positionKeys = HashMap<Int, Any>()
     private val states = HashMap<Any, KeyState>()
 
-    /** Held positions that are not published. */
-    val hiddenPositions: Set<Int> get() = hidden
+    /** Held positions that are not published; a copy, safe to iterate across [confirm]. */
+    val hiddenPositions: Set<Int> get() = hidden.toSet()
+
+    fun isHidden(position: Int): Boolean = position in hidden
 
     /**
      * Merges [incoming] with the same semantics as [mergeIntoCache] and resolves key conflicts.
@@ -107,6 +109,10 @@ internal class KeyedCache<T>(private val itemKey: (T) -> Any) {
         private val confirmedKeys = LinkedHashSet<Any>()
         private val rekeyed = HashSet<Int>()
 
+        // Keys that gained a position here: that starts a fresh conflict, whichever order the
+        // portion's rewrites come in.
+        private val joinedKeys = HashSet<Any>()
+
         fun remove(position: Int) {
             val key = positionKeys.remove(position) ?: return
             release(position, key)
@@ -131,6 +137,7 @@ internal class KeyedCache<T>(private val itemKey: (T) -> Any) {
             state.positions += position
             state.owner = position
             state.confirmed = false
+            joinedKeys += key
             affectedKeys += key
         }
 
@@ -143,7 +150,7 @@ internal class KeyedCache<T>(private val itemKey: (T) -> Any) {
             val state = states.getValue(key)
             state.positions.remove(position)
             state.positions += position
-            if (confirmOnRewrite && position in hidden) {
+            if (confirmOnRewrite && position in hidden && key !in joinedKeys) {
                 state.confirmed = true
                 confirmedKeys += key
             }
@@ -217,7 +224,7 @@ internal data class ConfirmedConflict(val key: Any, val positions: Set<Int>)
  * Outcome of a [KeyedCache] write.
  *
  * @property confirmed Conflicts confirmed by this write.
- * @property newlyHidden Positions that were visible or newly written before the write and are hidden
- * after it.
+ * @property newlyHidden Positions hidden after the write that were visible before it or got a new key
+ * from it; one that stays hidden under the same key is not included.
  */
 internal data class WriteResult(val confirmed: List<ConfirmedConflict>, val newlyHidden: Set<Int>)

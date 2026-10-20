@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -144,9 +145,10 @@ internal class StreamingPagerState<T>(
         }
     }
 
-    suspend fun removeStreamByRange(range: IntRange) = withContext(NonCancellable) {
+    suspend fun removeStreamByRange(range: IntRange, stream: Job) = withContext(NonCancellable) {
         mutex.withLock {
             activeStreams.remove(range)
+            keyed?.streamEndedLocked(stream)
             rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
                 // A stream that ended in an error keeps its state: it is the only record the
                 // consumer has of the failure, and dropping it here reported the list as an empty
@@ -169,7 +171,7 @@ internal class StreamingPagerState<T>(
                         "onPortion(range=$range, count=${values.size}, " +
                             "keys=${values.keys.minOrNull()}..${values.keys.maxOrNull()})"
                     }
-                    if (keyed == null) onPortion(values) else keyed.onPortion(values, scope)
+                    if (keyed == null) onPortion(values) else keyed.onPortion(values, coroutineContext.job, scope)
                     rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
                         current.withRangeState(range, LoadState.Success)
                     }
@@ -183,7 +185,7 @@ internal class StreamingPagerState<T>(
                     current.withRangeState(range, LoadState.Error(t, range.first))
                 }
             } finally {
-                removeStreamByRange(range)
+                removeStreamByRange(range, coroutineContext.job)
             }
         }
         activeStreams[range] = job
@@ -345,8 +347,12 @@ internal class StreamingPagerState<T>(
         /** Pending grace timers by hidden position. */
         private val graceTimers: MutableMap<Int, Job> = HashMap()
 
-        suspend fun onPortion(values: Map<Int, T>, scope: CoroutineScope) {
+        /** Live portion streams that have emitted at least once. */
+        private val emittedStreams: MutableSet<Job> = HashSet()
+
+        suspend fun onPortion(values: Map<Int, T>, stream: Job, scope: CoroutineScope) {
             mutex.withLock {
+                emittedStreams += stream
                 val cacheRange = ((lastReadKey - config.cacheSize)..(lastReadKey + config.cacheSize))
                 val pruneExisting = prunedCacheRange != cacheRange
                 val visibleCountBefore = cache.visible.size
@@ -375,9 +381,14 @@ internal class StreamingPagerState<T>(
             data.value = PagingMap(size, cache.visible, ::onGet, cache.keys)
         }
 
+        fun streamEndedLocked(stream: Job) {
+            emittedStreams -= stream
+        }
+
         /**
          * Confirms the conflict hiding [position] once its window has stayed live for
-         * [CONFLICT_GRACE_MS] without re-emitting. A closed window keeps it hidden until it reopens.
+         * [CONFLICT_GRACE_MS] without re-emitting. A closed window keeps it hidden until it reopens,
+         * and a reopened one until it emits: before that it has said nothing about the position.
          */
         private fun startGraceTimerLocked(position: Int, scope: CoroutineScope) {
             graceTimers.remove(position)?.cancel()
@@ -385,7 +396,9 @@ internal class StreamingPagerState<T>(
                 delay(CONFLICT_GRACE_MS)
                 mutex.withLock {
                     graceTimers.remove(position)
-                    val windowLive = activeStreams.any { (range, job) -> position in range && job.isActive }
+                    val windowLive = activeStreams.any { (range, job) ->
+                        position in range && job.isActive && job in emittedStreams
+                    }
                     if (!windowLive) return@withLock
                     val conflict = cache.confirm(position) ?: return@withLock
                     logConfirmed(conflict)

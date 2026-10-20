@@ -35,6 +35,9 @@ class PagerKeysTest {
         /** Whether a read completes without emitting. */
         var silent: (start: Int, read: Int) -> Boolean = { _, _ -> false }
 
+        /** Positions a read leaves out of its portion. */
+        var omitted: (start: Int, read: Int) -> Set<Int> = { _, _ -> emptySet() }
+
         val totalReads: Int get() = reads.values.sum()
 
         fun readData(start: Int, size: Int): Flow<DataPortion<Row>> = flow {
@@ -46,7 +49,7 @@ class PagerKeysTest {
             val snapshot = list
             delay(beforeEmit)
             val end = minOf(start + size, snapshot.size)
-            val values = (start until end).associateWith { snapshot[it] }
+            val values = (start until end).associateWith { snapshot[it] } - omitted(start, read)
             if (silent(start, read)) return@flow
             emit(DataPortion(snapshot.size, values.toPersistentMap()))
         }
@@ -189,6 +192,87 @@ class PagerKeysTest {
     }
 
     @Test
+    fun holeTheRefetchCannotFill_readingItDoesNotReload() = runTest {
+        val source = ListSource(ids(100).mapIndexed { i, row -> if (i == 25 || i == 30) "u" to i else row })
+        // The refetch of 20..39 no longer has position 25, so the round cannot resolve "u".
+        source.omitted = { start, read -> if (start == 20 && read > 0) setOf(25) else emptySet() }
+        val c = collect(pager(source))
+        advanceUntilIdle()
+        c.latest.data[60]
+        advanceUntilIdle()
+        (25 in c.latest.data.values) shouldBe false
+        val readsBefore = source.totalReads
+
+        // A still viewport at 60, whose window holds the hole, keeps reading it.
+        repeat(3) {
+            c.latest.data[25]
+            c.latest.data[60]
+            advanceUntilIdle()
+        }
+
+        source.totalReads shouldBe readsBefore
+        c.job.cancel()
+    }
+
+    @Test
+    fun passWithNothingToFetch_stillResolvesConflictLeftBySupersededPass() = runTest {
+        val source = ListSource(ids(80))
+        val c = collect(pager(source))
+        advanceUntilIdle()
+        c.latest.data[70]
+        advanceUntilIdle()
+        // 0..19 and 40..79 are cached. r5 moves to 25, so loading 20..39 hides the stale 5.
+        source.list = source.list.mapIndexed { i, row ->
+            when (i) {
+                5 -> source.list[25]
+                25 -> source.list[5]
+                else -> row
+            }
+        }
+        // The conflict round of that pass is slow and gets superseded.
+        source.delays = { start, read -> if (read == 1 && (start == 0 || start == 20)) 0L to 200L else 0L to 0L }
+
+        c.latest.data[30]
+        advanceTimeBy(50)
+        (5 in c.latest.data.values) shouldBe false
+        // Window 40..79 is fully cached: this pass has no chunks of its own.
+        c.latest.data[70]
+        advanceTimeBy(100)
+
+        val data = c.latest.data
+        data.values[5].shouldNotBeNull().first shouldBe "r25"
+        data.values[25].shouldNotBeNull().first shouldBe "r5"
+        data.keyAt(5) shouldBe "r25"
+        c.snapshots.forEach(::assertUnique)
+        advanceUntilIdle()
+        c.job.cancel()
+    }
+
+    @Test
+    fun supersededDuringRefetchRound_staleRoundWritesNothing() = runTest {
+        val source = ListSource(ids(60).mapIndexed { i, row -> if (i == 19 || i == 20) "u" to i else row })
+        // The first conflict round snapshots the list and emits late.
+        source.delays = { start, read -> if (read == 1 && (start == 0 || start == 20)) 0L to 200L else 0L to 0L }
+        val c = collect(pager(source))
+        advanceUntilIdle()
+        c.latest.data[1]
+        advanceTimeBy(50)
+
+        // "u" leaves 20 before the stale round would land, and a new pass supersedes it.
+        source.list = source.list.mapIndexed { i, row -> if (i == 20) "v" to i else row }
+        c.latest.data[50]
+        advanceUntilIdle()
+
+        val data = c.latest.data
+        data.values[19].shouldNotBeNull().first shouldBe "u"
+        data.values[20].shouldNotBeNull().first shouldBe "v"
+        data.keyAt(19) shouldBe "u"
+        data.keyAt(20) shouldBe "v"
+        c.snapshots.forEach(::assertUnique)
+        c.job.cancel()
+    }
+
+    @Test
     fun conflictArisingInRefetchRound_staysHidden() = runTest {
         val source = swapDuringRefetchSource()
         val c = collect(pager(source))
@@ -237,7 +321,8 @@ class PagerKeysTest {
         loadBothPages(c)
         c.latest.data.keyAt(20) shouldBe "u"
 
-        source.delays = { _, _ -> 0L to 10L }
+        // 0..19 lands before 20..39, on reload and on refetch alike.
+        source.delays = { start, _ -> 0L to if (start == 0) 10L else 20L }
         val before = c.snapshots.size
         pager.refresh()
         runCurrent()
@@ -245,6 +330,9 @@ class PagerKeysTest {
         val cleared = c.snapshots.drop(before).first { it.data.values.isEmpty() }
         (0 until cleared.data.size).all { isFallback(cleared.data.keyAt(it)) } shouldBe true
         advanceUntilIdle()
+        // The confirmation was dropped with the cache: "u" is hidden again until the round confirms it.
+        c.snapshots.drop(before).any { 20 in it.data.values && 19 !in it.data.values } shouldBe true
+        c.latest.data.values.keys shouldContainExactlyInAnyOrder (0..39).toList()
         c.job.cancel()
     }
 

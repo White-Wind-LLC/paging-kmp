@@ -22,21 +22,23 @@ import kotlinx.collections.immutable.toPersistentMap
  * - Memory-efficient sparse storage (only loaded items consume memory)
  * - Immutable design for reactive programming patterns
  *
+ * Item keys ([keyAt]) are supplied only by the pagers, so they stay unique in every map a consumer
+ * sees; a map built through the public constructor has fallback keys only.
+ *
  * @param V The type of values stored in the map
- * @param size Total number of items in the complete dataset
- * @param values Map of loaded items (position -> item)
+ * @property size Total number of items in the complete dataset
+ * @property values Map of loaded items (position -> item)
  * @param onGet Callback invoked when an item is accessed (triggers loading)
- * @param keys Keys of the positions that won their item key; positions hidden by a key
- * conflict are absent from [values] and have no entry here
  */
-public data class PagingMap<V>(
-    val size: Int,
-    val values: PersistentMap<Int, V>,
+public class PagingMap<V> internal constructor(
+    public val size: Int,
+    public val values: PersistentMap<Int, V>,
     private val onGet: (key: Int) -> Unit,
-    private val keys: PersistentMap<Int, Any> = persistentMapOf(),
+    // Owners' item keys by position; a position without an entry uses the fallback key.
+    private val keys: PersistentMap<Int, Any>,
 ) {
 
-    /** Source-compatible constructor that allows a trailing `onGet` lambda; all keys are fallbacks. */
+    /** Creates a map whose keys are all fallbacks; allows a trailing `onGet` lambda. */
     public constructor(
         size: Int,
         values: PersistentMap<Int, V>,
@@ -52,6 +54,27 @@ public data class PagingMap<V>(
          * Used as initial state or for testing
          */
         public fun <V> empty(): PagingMap<V> = PagingMap(0, persistentMapOf()) {}
+    }
+
+    /**
+     * Returns a copy with the given properties replaced.
+     *
+     * A position keeps its item key only while it is inside the new [size] and holds an equal value;
+     * the rest fall back, so a copy never pairs a key with another item.
+     */
+    public fun copy(
+        size: Int = this.size,
+        values: PersistentMap<Int, V> = this.values,
+        onGet: (key: Int) -> Unit = this.onGet,
+    ): PagingMap<V> {
+        val keptKeys = if (values === this.values && size >= this.size) {
+            keys
+        } else {
+            keys.filter { (position, _) ->
+                position < size && position in values && values[position] == this.values[position]
+            }.toPersistentMap()
+        }
+        return PagingMap(size, values, onGet, keptKeys)
     }
 
     /**
@@ -124,4 +147,20 @@ public data class PagingMap<V>(
      * @return The maximum loaded position, or -1 if no data is loaded
      */
     public fun lastKey(): Int = values.keys.maxOfOrNull { it } ?: -1
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is PagingMap<*>) return false
+        return size == other.size && values == other.values && onGet == other.onGet && keys == other.keys
+    }
+
+    override fun hashCode(): Int {
+        var result = size
+        result = 31 * result + values.hashCode()
+        result = 31 * result + onGet.hashCode()
+        result = 31 * result + keys.hashCode()
+        return result
+    }
+
+    override fun toString(): String = "PagingMap(size=$size, values=$values)"
 }

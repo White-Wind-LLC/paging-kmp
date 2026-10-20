@@ -338,7 +338,8 @@ class PagingMediatorTest {
 
     @Test
     fun itemKey_staleLocalThenRemote_uniqueKeys() = runTest {
-        // Local 6..9 is stale (ids shifted by two): id 4 sits at 4 (remote) and at 6 (local) until 5..9 is refetched
+        // Local 6..9 is stale (ids shifted by two): id 4 sits at 4 (remote) and at 6 (local)
+        // until 5..9 is refetched
         val local = FakeLocal(
             initialTotalSize = 10,
             initialValues = (6..9).associateWith { Item(it - 2) },
@@ -362,9 +363,12 @@ class PagingMediatorTest {
         val snapshots = mutableListOf<PagingData<Item>>()
         val job: Job = launch { mediator.flow(Unit).collect { snapshots += it } }
         testScheduler.runCurrent()
+        // Reading 7 moves the window there, so the stale local 6..9 is emitted before the remote.
         snapshots.last().data[7]
         advanceFully(1_000)
 
+        // On the way, the stale local id 4 at 6 hid the remote one at 4 instead of duplicating it.
+        snapshots.any { it.data.values[6] == Item(4) && 4 !in it.data.values } shouldBe true
         snapshots.forEach { snapshot ->
             val data = snapshot.data
             val keys = (0 until data.size).map { data.keyAt(it) }
