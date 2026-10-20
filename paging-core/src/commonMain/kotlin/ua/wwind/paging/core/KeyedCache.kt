@@ -96,15 +96,6 @@ internal class KeyedCache<T>(private val itemKey: (T) -> Any) {
         return result
     }
 
-    fun confirmAll(): List<ConfirmedConflict> {
-        val conflicts = unconfirmedConflicts()
-        if (conflicts.isEmpty()) return emptyList()
-        val tx = Transaction()
-        for (key in conflicts.keys) tx.confirm(key)
-        tx.commit()
-        return conflicts.map { (key, positions) -> ConfirmedConflict(key, positions) }
-    }
-
     /** Batches changes through builders and republishes only the positions of affected keys. */
     private inner class Transaction {
         private val valuesBuilder = values.builder()

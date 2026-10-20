@@ -162,19 +162,17 @@ class KeyedCacheTest {
     }
 
     @Test
-    fun unconfirmedConflicts_and_confirmAll() {
+    fun unconfirmedConflicts_listsEveryPositionUntilConfirmed() {
         val cache = cache()
         cache.put(1 to "a", 5 to "b")
         cache.put(2 to "a", 6 to "b", 7 to "b")
 
         cache.unconfirmedConflicts() shouldBe mapOf("a" to setOf(1, 2), "b" to setOf(5, 6, 7))
 
-        val confirmed = cache.confirmAll()
+        cache.confirm(1) shouldBe ConfirmedConflict("a", setOf(1, 2))
+        cache.unconfirmedConflicts() shouldBe mapOf("b" to setOf(5, 6, 7))
+        cache.confirm(5) shouldBe ConfirmedConflict("b", setOf(5, 6, 7))
 
-        confirmed.toSet() shouldBe setOf(
-            ConfirmedConflict("a", setOf(1, 2)),
-            ConfirmedConflict("b", setOf(5, 6, 7)),
-        )
         cache.hiddenPositions shouldBe emptySet()
         cache.unconfirmedConflicts() shouldBe emptyMap()
         cache.visible.keys shouldBe setOf(1, 2, 5, 6, 7)

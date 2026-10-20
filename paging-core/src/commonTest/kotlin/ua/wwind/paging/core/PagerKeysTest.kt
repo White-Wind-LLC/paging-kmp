@@ -29,6 +29,9 @@ class PagerKeysTest {
         /** Delay before the list is read, then delay before the portion is emitted. */
         var delays: (start: Int, read: Int) -> Pair<Long, Long> = { _, _ -> 0L to 0L }
 
+        /** Runs right before the list is read. */
+        var beforeSnapshot: (start: Int, read: Int) -> Unit = { _, _ -> }
+
         val totalReads: Int get() = reads.values.sum()
 
         fun readData(start: Int, size: Int): Flow<DataPortion<Row>> = flow {
@@ -36,6 +39,7 @@ class PagerKeysTest {
             reads[start] = read + 1
             val (beforeRead, beforeEmit) = delays(start, read)
             delay(beforeRead)
+            beforeSnapshot(start, read)
             val snapshot = list
             delay(beforeEmit)
             val end = minOf(start + size, snapshot.size)
@@ -137,6 +141,44 @@ class PagerKeysTest {
 
         advanceTimeBy(5_000)
         advanceUntilIdle()
+        source.totalReads shouldBe 4
+        c.job.cancel()
+    }
+
+    @Test
+    fun conflictArisingInRefetchRound_staysHidden() = runTest {
+        val source = ListSource(ids(40).mapIndexed { i, row -> if (i == 19 || i == 20) "u" to i else row })
+        // Refetch round: 20..39 reads before r10 and r25 swap and lands last; 0..19 reads after.
+        source.delays = { start, read ->
+            when {
+                read != 1 -> 0L to 0L
+                start == 0 -> 100L to 0L
+                else -> 0L to 200L
+            }
+        }
+        source.beforeSnapshot = { start, read ->
+            if (start == 0 && read == 1) {
+                source.list = source.list.mapIndexed { i, row ->
+                    when (i) {
+                        10 -> source.list[25]
+                        25 -> source.list[10]
+                        else -> row
+                    }
+                }
+            }
+        }
+        val c = collect(pager(source))
+        loadBothPages(c)
+
+        val data = c.latest.data
+        // The refetched real duplicate is confirmed...
+        data.values[19].shouldNotBeNull().first shouldBe "u"
+        data.values[20].shouldNotBeNull().first shouldBe "u"
+        // ...while r25, duplicated by the round itself, stays on one position only.
+        data.values.values.count { it.first == "r25" } shouldBe 1
+        listOf(10, 25).count { it in data.values } shouldBe 1
+        c.snapshots.forEach(::assertKeysUnique)
+        // No second round.
         source.totalReads shouldBe 4
         c.job.cancel()
     }

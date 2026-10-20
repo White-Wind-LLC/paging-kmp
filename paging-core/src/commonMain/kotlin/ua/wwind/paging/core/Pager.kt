@@ -425,8 +425,8 @@ public class Pager<T>(
      * accumulator - and is never held across a fetch.
      *
      * With [keyedCache], key conflicts left at the end of the pass get one more round: every grid
-     * cell holding a position of a conflicting key is refetched once, then whatever conflict
-     * survives is confirmed.
+     * cell holding a position of a conflicting key is refetched once, then each of those conflicts
+     * that still sits on the same positions is confirmed.
      */
     private suspend fun runLoads(
         plan: LoadPlan,
@@ -460,10 +460,11 @@ public class Pager<T>(
             dataFlow.value = cache.next(dataFlow.value, portion, onGet)
         }
         if (keyedCache != null) {
-            val conflictCells = mutex.withLock {
+            val (conflicts, conflictCells) = mutex.withLock {
                 currentCoroutineContext().ensureActive()
+                val conflicts = keyedCache.unconfirmedConflicts()
                 val limit = dataFlow.value.size - 1
-                keyedCache.unconfirmedConflicts().values.flatten()
+                conflicts to conflicts.values.flatten()
                     .map { gridCellAt(it, limit) }
                     .filterNot { it.isEmpty() }
                     .distinct()
@@ -473,7 +474,14 @@ public class Pager<T>(
             }
             mutex.withLock {
                 currentCoroutineContext().ensureActive()
-                if (keyedCache.confirmAll().isNotEmpty()) dataFlow.value = cache.publish(dataFlow.value.size, onGet)
+                // Only conflicts whose every page was just refetched; ones that arose in this round
+                // stay hidden for the next pass.
+                val remaining = keyedCache.unconfirmedConflicts()
+                val confirmed = conflicts.count { (key, positions) ->
+                    remaining[key] == positions &&
+                        keyedCache.confirm(positions.first { it in keyedCache.hiddenPositions }) != null
+                }
+                if (confirmed > 0) dataFlow.value = cache.publish(dataFlow.value.size, onGet)
             }
         }
         loadStateFlow.value = LoadState.Success // Signal loading completed
