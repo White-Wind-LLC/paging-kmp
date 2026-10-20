@@ -1,11 +1,13 @@
 package ua.wwind.paging.core.stream
 
 import co.touchlab.kermit.Logger
+import kotlinx.collections.immutable.PersistentMap
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -17,6 +19,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import ua.wwind.paging.core.ConfirmedConflict
+import ua.wwind.paging.core.KeyedCache
 import ua.wwind.paging.core.LoadState
 import ua.wwind.paging.core.PagingMap
 import ua.wwind.paging.core.mergeIntoCache
@@ -35,12 +39,19 @@ internal fun Map<IntRange, LoadState>?.withRangeState(range: IntRange, state: Lo
     return this.orEmpty() + (range to state)
 }
 
+/** How long a hidden position's window may stay live and silent before its duplicate counts as real. */
+internal const val CONFLICT_GRACE_MS: Long = 1_000L
+
 internal class StreamingPagerState<T>(
     val config: StreamingPagerConfig,
     val readPortion: (pos: Int, loadSize: Int) -> Flow<Map<Int, T>>,
     logger: Logger,
+    itemKey: ((T) -> Any)? = null,
 ) {
     val logger: Logger = logger.withTag("StreamingPager")
+
+    /** Replaces the plain values cache when `itemKey` is set. */
+    private val keyed: Keyed? = itemKey?.let { Keyed(KeyedCache(it)) }
 
     val mutex: Mutex = Mutex()
     val keyTrigger: MutableStateFlow<Int> = MutableStateFlow(0)
@@ -158,7 +169,7 @@ internal class StreamingPagerState<T>(
                         "onPortion(range=$range, count=${values.size}, " +
                             "keys=${values.keys.minOrNull()}..${values.keys.maxOrNull()})"
                     }
-                    onPortion(values)
+                    if (keyed == null) onPortion(values) else keyed.onPortion(values, scope)
                     rangeLoadStates.update { current: Map<IntRange, LoadState>? ->
                         current.withRangeState(range, LoadState.Success)
                     }
@@ -186,13 +197,17 @@ internal class StreamingPagerState<T>(
 
         val newRange = 0..<newTotal.coerceAtLeast(1)
         // Only removes keys, so the `prunedCacheRange` invariant survives untouched.
-        val prunedValues = current.values.pruneToRange(newRange)
-        data.update {
-            PagingMap(
-                size = newTotal,
-                values = prunedValues,
-                onGet = ::onGet,
-            )
+        if (keyed == null) {
+            val prunedValues = current.values.pruneToRange(newRange)
+            data.update {
+                PagingMap(
+                    size = newTotal,
+                    values = prunedValues,
+                    onGet = ::onGet,
+                )
+            }
+        } else {
+            keyed.pruneLocked(newRange, newTotal)
         }
         settledRange.value = data.value.settledRangeAround(lastReadKey, margin = config.loadSize)
 
@@ -321,5 +336,67 @@ internal class StreamingPagerState<T>(
     fun cancelActiveStreams() {
         activeStreams.values.forEach { it.cancel(CancellationException("StreamingPager: flow collection cancelled")) }
         activeStreams.clear()
+    }
+
+    /** The `itemKey` path: writes through a [KeyedCache] and confirms real duplicates. Guarded by [mutex]. */
+    private inner class Keyed(private val cache: KeyedCache<T>) {
+        private var publishedKeys: PersistentMap<Int, Any> = persistentMapOf()
+
+        /** Pending grace timers by hidden position. */
+        private val graceTimers: MutableMap<Int, Job> = HashMap()
+
+        suspend fun onPortion(values: Map<Int, T>, scope: CoroutineScope) {
+            mutex.withLock {
+                val cacheRange = ((lastReadKey - config.cacheSize)..(lastReadKey + config.cacheSize))
+                val pruneExisting = prunedCacheRange != cacheRange
+                val visibleCountBefore = cache.visible.size
+                val result = cache.write(values, cacheRange, pruneExisting, confirmOnRewrite = true)
+                prunedCacheRange = cacheRange
+                publishLocked(data.value.size)
+                result.confirmed.forEach(::logConfirmed)
+                if (pruneExisting || cache.visible.size != visibleCountBefore || result.newlyHidden.isNotEmpty()) {
+                    settledRange.value = data.value.settledRangeAround(lastReadKey, margin = config.loadSize)
+                }
+                result.newlyHidden.forEach { position -> startGraceTimerLocked(position, scope) }
+            }
+        }
+
+        /** Drops positions outside [range] and publishes with [size]. Expects [mutex] to be held. */
+        fun pruneLocked(range: IntRange, size: Int) {
+            cache.prune(range)
+            publishLocked(size)
+        }
+
+        /** Publishes [cache] unless it is already what [data] holds. */
+        private fun publishLocked(size: Int) {
+            val current = data.value
+            if (current.size == size && current.values === cache.visible && publishedKeys === cache.keys) return
+            publishedKeys = cache.keys
+            data.value = PagingMap(size, cache.visible, ::onGet, cache.keys)
+        }
+
+        /**
+         * Confirms the conflict hiding [position] once its window has stayed live for
+         * [CONFLICT_GRACE_MS] without re-emitting. A closed window keeps it hidden until it reopens.
+         */
+        private fun startGraceTimerLocked(position: Int, scope: CoroutineScope) {
+            graceTimers.remove(position)?.cancel()
+            graceTimers[position] = scope.launch {
+                delay(CONFLICT_GRACE_MS)
+                mutex.withLock {
+                    graceTimers.remove(position)
+                    val windowLive = activeStreams.any { (range, job) -> position in range && job.isActive }
+                    if (!windowLive) return@withLock
+                    val conflict = cache.confirm(position) ?: return@withLock
+                    logConfirmed(conflict)
+                    publishLocked(data.value.size)
+                    settledRange.value = data.value.settledRangeAround(lastReadKey, margin = config.loadSize)
+                }
+            }
+        }
+
+        private fun logConfirmed(c: ConfirmedConflict) {
+            logger.w { "itemKey ${c.key} is at positions ${c.positions} in the source; showing all of them" }
+        }
     }
 }

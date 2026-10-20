@@ -78,6 +78,15 @@ public data class StreamingPagerConfig(
  *
  * @property config Paging behavior configuration (see `StreamingPagerConfig`).
  * @property readTotal Provider of a continuous flow with the current total item count.
+ * @property itemKey Optional stable key of an item, exposed through `PagingMap.keyAt` (for example as
+ * the `LazyColumn` key). Must return a type a Bundle can store - `Uuid`, `String` or a primitive, not
+ * a boxed value class - and never a `String` starting with `PagingMap.FALLBACK_KEY_PREFIX`. Keys
+ * should be unique in the source. When one key shows up at several positions, the last written one is
+ * shown and the others are hidden: a transient duplicate (an item that moved between windows that
+ * have not all re-emitted yet) resolves as soon as the stale window catches up. A real duplicate is
+ * confirmed when the hidden position's window re-emits the same key there, or stays live but silent
+ * for a second; all its positions are then shown, extra ones under fallback keys, and a warning is
+ * logged. With `null`, every key is a fallback and nothing is hidden.
  * @property readPortion Provider of a flow for a portion starting at `pos` of length `loadSize`,
  * returning only the map of values keyed by absolute index.
  */
@@ -86,8 +95,16 @@ public data class StreamingPagerConfig(
 public class StreamingPager<T>(
     private val config: StreamingPagerConfig = StreamingPagerConfig(),
     private val readTotal: () -> Flow<Int>,
+    private val itemKey: ((T) -> Any)? = null,
     private val readPortion: (pos: Int, loadSize: Int) -> Flow<Map<Int, T>>,
 ) {
+    /** Source-compatible constructor for positional calls without `itemKey`. */
+    public constructor(
+        config: StreamingPagerConfig,
+        readTotal: () -> Flow<Int>,
+        readPortion: (pos: Int, loadSize: Int) -> Flow<Map<Int, T>>,
+    ) : this(config, readTotal, null, readPortion)
+
     /**
      * Public flow of paging state for the UI. Jobs are bound to the collection lifecycle.
      *
@@ -107,6 +124,7 @@ public class StreamingPager<T>(
             config = config,
             readPortion = readPortion,
             logger = logger,
+            itemKey = itemKey,
         )
 
         val retryRequests: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 1)
