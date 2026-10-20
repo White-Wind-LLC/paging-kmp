@@ -32,6 +32,9 @@ class PagerKeysTest {
         /** Runs right before the list is read. */
         var beforeSnapshot: (start: Int, read: Int) -> Unit = { _, _ -> }
 
+        /** Whether a read completes without emitting. */
+        var silent: (start: Int, read: Int) -> Boolean = { _, _ -> false }
+
         val totalReads: Int get() = reads.values.sum()
 
         fun readData(start: Int, size: Int): Flow<DataPortion<Row>> = flow {
@@ -44,6 +47,7 @@ class PagerKeysTest {
             delay(beforeEmit)
             val end = minOf(start + size, snapshot.size)
             val values = (start until end).associateWith { snapshot[it] }
+            if (silent(start, read)) return@flow
             emit(DataPortion(snapshot.size, values.toPersistentMap()))
         }
     }
@@ -168,6 +172,20 @@ class PagerKeysTest {
             }
         }
         return source
+    }
+
+    @Test
+    fun refetchWritingNothing_doesNotConfirm() = runTest {
+        val source = ListSource(ids(40).mapIndexed { i, row -> if (i == 19 || i == 20) "u" to i else row })
+        source.silent = { _, read -> read == 1 }
+        val c = collect(pager(source))
+        loadBothPages(c)
+
+        val data = c.latest.data
+        listOf(19, 20).count { it in data.values } shouldBe 1
+        data.values.values.count { it.first == "u" } shouldBe 1
+        source.totalReads shouldBe 4
+        c.job.cancel()
     }
 
     @Test

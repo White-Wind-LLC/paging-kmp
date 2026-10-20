@@ -263,8 +263,10 @@ public interface RemoteDataSource<T, Q> {
  * - [itemKey]: Optional stable key of an item, exposed through `PagingMap.keyAt`. Same contract as
  *   `Pager`'s `itemKey`: keys should be unique, must be Bundle-storable and never a `String` starting
  *   with `PagingMap.FALLBACK_KEY_PREFIX`. A transient duplicate (for example a stale local page next
- *   to a fresh remote one) is hidden and resolved within the same loading pass. With `null`, every
- *   key is a fallback and nothing is hidden.
+ *   to a fresh remote one) is hidden and resolved within the same loading pass. A source that serves
+ *   the refetch from an HTTP cache can return the stale page again, so a transient duplicate may then
+ *   be confirmed and shown twice (keys stay unique). With `null`, every key is a fallback and nothing
+ *   is hidden.
  */
 public data class PagingMediatorConfig<T>(
     val loadSize: Int = 20,

@@ -70,7 +70,9 @@ import kotlin.math.abs
  * shown and the others are hidden: a transient duplicate (an item that moved between pages read at
  * different times) resolves within the same loading pass, which refetches once every page holding
  * the key. A duplicate that survives that refetch is real; all its positions are then shown, extra
- * ones under fallback keys. With `null`, every key is a fallback and nothing is hidden.
+ * ones under fallback keys. A source that serves the refetch from an HTTP cache can return the stale
+ * page again, so a transient duplicate may then be confirmed and shown twice (keys stay unique).
+ * With `null`, every key is a fallback and nothing is hidden.
  * @param readData function to load data portions from the data source
  */
 @OptIn(FlowPreview::class)
@@ -437,7 +439,7 @@ public class Pager<T>(
      *
      * With [keyedCache], key conflicts left at the end of the pass get one more round: every grid
      * cell holding a position of a conflicting key is refetched once, then each of those conflicts
-     * that still sits on the same positions is confirmed.
+     * that the refetch rewrote and that still sits on the same positions is confirmed.
      */
     private suspend fun runLoads(
         plan: LoadPlan,
@@ -481,16 +483,19 @@ public class Pager<T>(
                     .filterNot { it.isEmpty() }
                     .distinct()
             }
+            val refetched = HashSet<Int>()
             fetchChunks(conflictCells, permits, mutex, readData) { portion ->
+                refetched += portion.values.keys
                 dataFlow.value = cache.next(dataFlow.value, portion, onGet)
             }
             mutex.withLock {
                 currentCoroutineContext().ensureActive()
-                // Only conflicts whose every page was just refetched; ones that arose in this round
-                // stay hidden for the next pass.
+                // Only conflicts whose every position was just rewritten; ones that arose in this
+                // round, or whose refetch wrote nothing there, stay hidden for the next pass.
                 val remaining = keyedCache.unconfirmedConflicts()
                 val confirmed = conflicts.count { (key, positions) ->
                     remaining[key] == positions &&
+                        refetched.containsAll(positions) &&
                         keyedCache.confirm(positions.first { it in keyedCache.hiddenPositions }) != null
                 }
                 if (confirmed > 0) dataFlow.value = cache.publish(dataFlow.value.size, onGet)
